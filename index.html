@@ -29,7 +29,7 @@
     <option value="">BOTH MARKETS</option><option value="fanduel">FANDUEL</option><option value="prizepicks">PRIZEPICKS</option>
   </select>
   <select id="sel-model" aria-label="Projection source">
-    <option value="avg">MODELS AVERAGED</option><option value="sleeper">SLEEPER ONLY</option><option value="espn">ESPN ONLY</option>
+    <option value="avg">AVG MODELS</option><option value="sleeper">SLEEPER ONLY</option><option value="espn">ESPN ONLY</option>
   </select>
   <span class="count" id="count"></span>
 </div>
@@ -79,6 +79,10 @@ function render(){
     const slP=r.sleeper_proj!=null?50+((r.sleeper_proj-r.line)/scale*50):null;
     const esP=r.espn_proj!=null?50+((r.espn_proj-r.line)/scale*50):null;
     const clamp=v=>Math.max(0,Math.min(100,v));
+    const room=half<=32;
+    const numStyle=over
+      ?(room?`left:calc(50% + ${half}% + 6px);color:var(--green)`:`right:5px;color:#fff`)
+      :(room?`right:calc(50% + ${half}% + 6px);color:var(--red)`:`left:5px;color:#fff`);
     const box=document.createElement("div");box.className="prop";
     const say = (r.sleeper_proj!=null?`Sleeper has him at <b>${fmt(r.sleeper_proj)}</b>, the line is <b>${fmt(r.line)}</b>`:`No Sleeper projection for this one`)
       + ". " + (r.espn_proj!=null?`ESPN says <b>${fmt(r.espn_proj)}</b>`:"ESPN does not project him here") + ".";
@@ -91,7 +95,7 @@ function render(){
           <span class="fill ${over?"over":"under"}" style="${over?`left:50%;width:${half}%`:`right:50%;width:${half}%`}"></span>
           ${slP!=null?`<span class="pin sl" style="left:${clamp(slP)}%"></span>`:""}
           ${esP!=null?`<span class="pin es" style="left:${clamp(esP)}%"></span>`:""}
-          <span class="edgenum" style="${over?`left:calc(50% + ${half}% + 6px)`:`right:calc(50% + ${half}% + 6px)`};color:var(--${over?"green":"red"})">${over?"+":"−"}${fmt(Math.abs(e))}</span>
+          <span class="edgenum" style="${numStyle}">${over?"+":"−"}${fmt(Math.abs(e))}</span>
         </span>
       </button>
       <div class="pdet">
