@@ -50,6 +50,8 @@ body{background:var(--paper);color:var(--ink);font-family:"Archivo",sans-serif;f
 .pgrid b{display:block;margin-top:3px;font-size:16px;font-weight:700;color:var(--ink)}
 .pgrid .g-you b{color:var(--green)}
 .pgrid .g-vegas b{color:var(--red)}
+.pgrid i{display:block;font-style:normal;font-size:8px;font-weight:700;letter-spacing:.05em;color:var(--muted);margin-top:1px}
+.pdet p,.psay{overflow-wrap:anywhere}
 .psay{display:block;padding-top:10px;font-size:13px;line-height:19px;color:var(--ink)}
 .psay b{font-weight:700}
 .pstat b{color:var(--ink)}
