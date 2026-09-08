@@ -23,10 +23,14 @@ Everything the site reads comes from Supabase REST. Three tables + one view:
 
 ### `runs` / `edges` (written by collect.py every 30 min)
 
-`edges` columns: run_id, source (`fanduel` | `prizepicks`), game, kickoff,
-player, team, stat, line, over_odds, under_odds, sleeper_proj, espn_proj,
-sleeper_edge, espn_edge, week, season. The site reads the `latest_board`
-view (latest run's rows). Stat keys: pass_yds, pass_tds, pass_att, pass_comp,
+`edges` columns: run_id, league (`nfl` | `cfb`), source
+(`fanduel` | `prizepicks`), game, kickoff, player, team, stat, line,
+over_odds, under_odds, sleeper_proj, espn_proj, sleeper_edge, espn_edge,
+week, season. The site reads the `latest_board` view (latest run's rows per
+league). NFL rows carry projections; CFB rows are PrizePicks lines only
+(no free CFB projection source, and FanDuel posts no CFB player props), so
+projection/edge fields are null there and the CFB `week` is a date bucket,
+not the official CFB week number. Stat keys: pass_yds, pass_tds, pass_att, pass_comp,
 pass_int, rush_yds, rush_tds, rush_att, rec_yds, rec, rec_tds, rec_tgt,
 rush_rec_yds, pass_rush_yds, any_td (plus long_rec/long_rush/long_comp,
 lines-only, no projections exist).
