@@ -80,7 +80,7 @@ async function load(){
     lv.innerHTML=`<div class="vs-grid"><div class="vs-cell"><span class="n green">${hits}</span><span class="l">edges that hit</span></div><div class="vs-cell"><span class="n">${live.length-hits}</span><span class="l">edges that missed</span></div></div>`
       +live.slice(0,60).map(g=>`<div class="rec"><span class="d">W${g.week}</span><span class="pk"><b>${esc(g.player)}</b> ${esc(g.stat)} · ${g.side} ${fmt(g.line)} <span style="color:var(--muted)">(${esc(g.proj_source)} ${fmt(g.proj_value)}, actual ${fmt(g.actual)})</span></span><span class="res ${g.hit?"hit":"miss"}">${g.hit?"HIT":"MISS"}</span></div>`).join("");
   }else{
-    lv.innerHTML='<p class="sec-note">No graded weeks yet. The collector started Week 2, 2026 - the first scorecard posts after those games finish.</p>';
+    lv.innerHTML='<p class="sec-note">No graded weeks yet. The collector started Week 1, 2026 - the first scorecard posts after those games finish.</p>';
   }
   const u=bt.generated?new Date(bt.generated):null;
   document.getElementById("bug-upd").textContent=u?("BT "+u.toLocaleDateString("en-US",{month:"short",day:"numeric"}).toUpperCase()):"";
