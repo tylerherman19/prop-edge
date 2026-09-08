@@ -29,7 +29,7 @@ body{background:var(--paper);color:var(--ink);font-family:"Archivo",sans-serif;f
 .filters .fbtn.on{background:var(--ink);color:#fff}
 .filters .fbtn.over.on{background:var(--green);border-color:var(--green)}
 .filters .fbtn.under.on{background:var(--red);border-color:var(--red)}
-.filters select{font:inherit;font-size:11px;font-weight:700;letter-spacing:.06em;padding:7px 6px;border:1px solid var(--ink);background:var(--paper);color:var(--ink);max-width:34vw}
+.filters select{font:inherit;font-size:11px;font-weight:700;letter-spacing:.06em;padding:7px 6px;border:1px solid var(--ink);background:var(--paper);color:var(--ink);max-width:40vw}
 .filters .count{margin-left:auto;font-size:11px;font-weight:700;letter-spacing:.1em;color:var(--muted)}
 /* board rows */
 .prop{border-bottom:1px solid var(--faint)}
