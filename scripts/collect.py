@@ -289,8 +289,6 @@ def main():
     print("wrote out/edges.json", file=sys.stderr)
     supabase_publish(payload, projections)
 
-if __name__ == "__main__":
-    main()
 
 # ---------- Supabase write + grading (only when env keys are set) ----------
 def sb(method, path, key, body=None, prefer=None):
@@ -384,3 +382,6 @@ def espn_actuals_only(season, week):
             if v is not None: r[canon] = v
         act.append(r)
     return None, act
+
+if __name__ == "__main__":
+    main()
