@@ -97,10 +97,13 @@ def grade(proj, act, min_weeks=1):
     by_week = {}
     for pr in proj:
         a = aidx.get((norm_name(pr["player"]), pr["week"]))
-        if not a: continue
+        if not a: continue  # no row at all: bye or inactive, skip the week
+        if not any(a.get(t) is not None for t in STATS): continue  # placeholder row, no played stats
         for s in STATS:
-            pv, av = pr.get(s), a.get(s)
-            if pv is None or av is None: continue
+            pv = pr.get(s)
+            if pv is None: continue
+            av = a.get(s)
+            if av is None: av = 0.0  # zero stats are omitted from the feed; played week + missing key = 0
             if pv < 0.5: continue  # skip no-role players; keeps it honest and relevant
             errs[s].append(abs(pv - av))
             serrs[s].append(pv - av)
@@ -113,9 +116,12 @@ def grade(proj, act, min_weeks=1):
     for key, pr in pr_idx.items():
         a = aidx.get(key)
         if not a: continue
+        if not any(a.get(t) is not None for t in STATS): continue
         for cs, (c1, c2) in COMBO.items():
-            p1, p2, a1, a2 = pr.get(c1), pr.get(c2), a.get(c1), a.get(c2)
-            if None in (p1, p2, a1, a2): continue
+            p1, p2 = pr.get(c1), pr.get(c2)
+            if p1 is None or p2 is None: continue
+            a1 = a.get(c1); a1 = 0.0 if a1 is None else a1
+            a2 = a.get(c2); a2 = 0.0 if a2 is None else a2
             pv = p1 + p2
             if pv < 0.5: continue
             cerrs[cs].append(pv - (a1 + a2))
@@ -146,17 +152,21 @@ def grade_avg(sp, sa, ep, ea):
         a = aidx.get((norm_name(pr["player"]), pr["week"]))
         o = eidx.get((norm_name(pr["player"]), pr["week"]))
         if not a or not o: continue
+        if not any(a.get(t) is not None for t in STATS): continue
         for s in STATS:
-            v1, v2, av = pr.get(s), o.get(s), a.get(s)
-            if v1 is None or v2 is None or av is None: continue
+            v1, v2 = pr.get(s), o.get(s)
+            if v1 is None or v2 is None: continue
+            av = a.get(s)
+            if av is None: av = 0.0
             pv = (v1 + v2) / 2
             if pv < 0.5: continue
             serrs[s].append(pv - av)
         for cs, (c1, c2) in COMBO.items():
             v1a, v1b = pr.get(c1), pr.get(c2)
             v2a, v2b = o.get(c1), o.get(c2)
-            a1, a2 = a.get(c1), a.get(c2)
-            if None in (v1a, v1b, v2a, v2b, a1, a2): continue
+            if None in (v1a, v1b, v2a, v2b): continue
+            a1 = a.get(c1); a1 = 0.0 if a1 is None else a1
+            a2 = a.get(c2); a2 = 0.0 if a2 is None else a2
             pv = (v1a + v1b) / 2 + (v2a + v2b) / 2
             if pv < 0.5: continue
             cerrs[cs].append(pv - (a1 + a2))
