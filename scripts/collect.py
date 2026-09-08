@@ -30,16 +30,24 @@ def get(url, headers=None, tries=3):
             time.sleep(2 * (i + 1))
 
 # ---------- week math ----------
-def current_nfl_week(now=None):
-    now = now or datetime.now(timezone.utc)
-    # NFL weeks run Tue-Mon; W1 of 2026 opened Tue Sep 1 (games Sep 3-8).
-    anchor = datetime(2026, 9, 1, tzinfo=timezone.utc)
-    if now < anchor: return 1
-    return min(18, ((now - anchor).days // 7) + 1)
+# The 2026 NFL season opens Wed Sep 9 (Patriots at Seahawks). Site-facing weeks
+# are numbered from that date. NOTE: Sleeper and ESPN label this same slate
+# "week 2" (their week 1 is an empty preseason period) - verified by
+# cross-checking ESPN's Drake Maye projection against the market line for the
+# Sep 9 game. So feed week = site week + 1 for 2026.
+W1_OPEN = datetime(2026, 9, 9, tzinfo=timezone.utc)
+W1_TUE  = datetime(2026, 9, 8, tzinfo=timezone.utc)
+FEED_OFFSET = 1
+
+def site_week_for(d):
+    if d < W1_OPEN: return 1
+    return min(18, ((d - W1_OPEN).days // 7) + 1)
+
+def current_site_week(now=None):
+    return site_week_for(now or datetime.now(timezone.utc))
 
 def week_window(week, season=2026):
-    anchor = datetime(season, 9, 1, tzinfo=timezone.utc)
-    start = anchor + timedelta(days=7 * (week - 1))
+    start = W1_TUE + timedelta(days=7 * (week - 1))
     return start, start + timedelta(days=7)
 
 # ---------- name normalization ----------
@@ -256,20 +264,28 @@ def build_edges(lines, projections):
 
 def main():
     season = 2026
-    week = int(os.environ.get("PROP_WEEK") or current_nfl_week())
-    print(f"collecting season={season} week={week}", file=sys.stderr)
-    fd_lines, games = fanduel_collect(week, season)
+    fd_lines, games = fanduel_collect(1, season)
+    if games:
+        earliest = min(datetime.fromisoformat(g["open"].replace("Z", "+00:00")) for g in games)
+        week = site_week_for(earliest)
+    else:
+        week = current_site_week()
+    week = int(os.environ.get("PROP_WEEK") or week)
+    feed_week = week + FEED_OFFSET
+    print(f"collecting season={season} site_week={week} feed_week={feed_week}", file=sys.stderr)
     print(f"  fanduel: {len(fd_lines)} lines across {len(games)} games", file=sys.stderr)
     pp_lines = prizepicks_collect(week, season)
     print(f"  prizepicks: {len(pp_lines)} lines", file=sys.stderr)
-    sl = sleeper_collect(week, season)
+    sl = sleeper_collect(feed_week, season)
     print(f"  sleeper: {len(sl)} projections", file=sys.stderr)
     try:
-        es = espn_collect(week, season)
+        es = espn_collect(feed_week, season)
     except Exception as e:
         print(f"  espn failed: {e}", file=sys.stderr); es = []
     print(f"  espn: {len(es)} projections", file=sys.stderr)
     lines = fd_lines + pp_lines
+    for p in sl + es:
+        p["week"] = week
     projections = sl + es
     edges = build_edges(lines, projections)
     joined_sl = sum(1 for e in edges if e["sleeper_proj"] is not None)
@@ -277,7 +293,7 @@ def main():
     print(f"  edges: {len(edges)} rows; sleeper joined {joined_sl}, espn joined {joined_es}", file=sys.stderr)
     payload = {
         "taken_at": datetime.now(timezone.utc).isoformat(),
-        "season": season, "week": week, "games": games,
+        "season": season, "week": week, "feed_week": feed_week, "games": games,
         "counts": {"lines": len(lines), "fanduel": len(fd_lines), "prizepicks": len(pp_lines),
                    "sleeper_proj": len(sl), "espn_proj": len(es),
                    "edges": len(edges), "joined_sleeper": joined_sl, "joined_espn": joined_es},
@@ -331,7 +347,8 @@ def supabase_publish(payload, projections):
     grade_finished_weeks(key, payload["season"], payload["week"])
 
 def grade_finished_weeks(key, season, cur_week):
-    """Grade stored edges for finished weeks against ESPN actuals."""
+    """Grade stored edges for finished site weeks against ESPN actuals
+    (ESPN's scoring period for a site week is site week + FEED_OFFSET)."""
     for w in range(1, cur_week):
         done = sb("GET", f"live_grades?select=id&week=eq.{w}&season=eq.{season}&limit=1", key)
         if done: continue
@@ -340,7 +357,7 @@ def grade_finished_weeks(key, season, cur_week):
         # keep only the latest run's rows
         latest = edges[0]["run_id"]; edges = [e for e in edges if e["run_id"] == latest]
         try:
-            _, act = espn_actuals_only(season, w)
+            _, act = espn_actuals_only(season, w + FEED_OFFSET)
         except Exception as ex:
             print(f"  grade w{w}: actuals failed: {ex}", file=sys.stderr); continue
         aidx = {norm_name(a["player"]): a for a in act}
