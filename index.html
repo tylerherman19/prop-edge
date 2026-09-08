@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Prop Edge - The board</title>
+<meta name="description" content="NFL player props: two free projection models against the real market lines, ranked by the size of the disagreement." />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Archivo:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="ui.css" />
+</head>
+<body>
+<div class="bug"><span class="b1"><a href="index.html">PROP EDGE</a></span><span class="b2" id="bug-week">WK -</span><span class="b3" id="bug-upd"></span></div>
+<nav class="pagenav">
+<a href="index.html" class="on">THE BOARD</a>
+<a href="accuracy.html">ACCURACY</a>
+<a href="method.html">METHOD</a>
+</nav>
+<main>
+<p class="lede" id="lede">Loading the board - pulling the latest lines and projections.</p>
+<div class="filters" id="filters">
+  <button class="fbtn on" data-side="all">ALL</button>
+  <button class="fbtn over" data-side="over">OVER EDGE</button>
+  <button class="fbtn under" data-side="under">UNDER EDGE</button>
+  <select id="sel-stat" aria-label="Stat filter"><option value="">ALL STATS</option></select>
+  <select id="sel-team" aria-label="Team filter"><option value="">ALL TEAMS</option></select>
+  <select id="sel-src" aria-label="Market source">
+    <option value="">BOTH MARKETS</option><option value="fanduel">FANDUEL</option><option value="prizepicks">PRIZEPICKS</option>
+  </select>
+  <select id="sel-model" aria-label="Projection source">
+    <option value="avg">MODELS AVERAGED</option><option value="sleeper">SLEEPER ONLY</option><option value="espn">ESPN ONLY</option>
+  </select>
+  <span class="count" id="count"></span>
+</div>
+<div id="board"></div>
+<p class="note" id="datanote"></p>
+<section class="colophon">
+<p>Edge is the gap between what the models expect and the number the market posted. A big gap is a disagreement, not a guarantee. Nothing here is betting advice - it is arithmetic on free public data.</p>
+</section>
+</main>
+<script>
+const SB_URL = "__SUPABASE_URL__";
+const SB_KEY = "__SUPABASE_ANON_KEY__";
+const TZ = "America/Chicago";
+const STAT_LABEL = {pass_yds:"Passing yards",pass_tds:"Passing TDs",pass_att:"Pass attempts",pass_comp:"Completions",pass_int:"Interceptions",rush_yds:"Rushing yards",rush_tds:"Rushing TDs",rush_att:"Rush attempts",rec_yds:"Receiving yards",rec:"Receptions",rec_tds:"Receiving TDs",rec_tgt:"Targets",rush_rec_yds:"Rush + receiving yards",pass_rush_yds:"Pass + rush yards",long_rec:"Longest reception",long_rush:"Longest rush",long_comp:"Longest completion",any_td:"Touchdowns"};
+const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const fmt=(n,d=1)=>n==null?"—":Number(n).toLocaleString("en-US",{maximumFractionDigits:d});
+let ROWS=[], META={}, SIDE="all", MODEL="avg";
+
+function projOf(r){
+  const s=r.sleeper_proj, e=r.espn_proj;
+  if(MODEL==="sleeper")return s;
+  if(MODEL==="espn")return e;
+  if(s!=null&&e!=null)return (s+e)/2;
+  return s!=null?s:e;
+}
+function edgeOf(r){const p=projOf(r);return p==null?null:p-r.line;}
+function passes(r){
+  const e=edgeOf(r);
+  if(e==null)return false;
+  if(SIDE==="over"&&e<=0)return false;
+  if(SIDE==="under"&&e>=0)return false;
+  const st=document.getElementById("sel-stat").value; if(st&&r.stat!==st)return false;
+  const tm=document.getElementById("sel-team").value; if(tm&&r.team!==tm)return false;
+  const sc=document.getElementById("sel-src").value; if(sc&&r.source!==sc)return false;
+  return true;
+}
+function barScale(rows){let m=10;for(const r of rows){const a=Math.abs(edgeOf(r)||0);if(a>m)m=a}return m;}
+function render(){
+  const rows=ROWS.filter(passes).sort((a,b)=>Math.abs(edgeOf(b))-Math.abs(edgeOf(a)));
+  document.getElementById("count").textContent=rows.length+" PROPS";
+  const scale=barScale(rows);
+  const wrap=document.getElementById("board");wrap.innerHTML="";
+  if(!rows.length){wrap.innerHTML='<p class="sec-note">Nothing on the board with these filters. Loosen one.</p>';return}
+  for(const r of rows.slice(0,400)){
+    const e=edgeOf(r), over=e>0;
+    const half=Math.min(50,Math.abs(e)/scale*50);
+    const slP=r.sleeper_proj!=null?50+((r.sleeper_proj-r.line)/scale*50):null;
+    const esP=r.espn_proj!=null?50+((r.espn_proj-r.line)/scale*50):null;
+    const clamp=v=>Math.max(0,Math.min(100,v));
+    const box=document.createElement("div");box.className="prop";
+    const say = (r.sleeper_proj!=null?`Sleeper has him at <b>${fmt(r.sleeper_proj)}</b>, the line is <b>${fmt(r.line)}</b>`:`No Sleeper projection for this one`)
+      + ". " + (r.espn_proj!=null?`ESPN says <b>${fmt(r.espn_proj)}</b>`:"ESPN does not project him here") + ".";
+    box.innerHTML=`
+      <button class="prow" type="button" aria-expanded="false">
+        <span class="phead"><span class="nm">${esc(r.player)}</span><span class="tm">${esc(r.team||"")}</span><span class="src">${r.source==="fanduel"?"FANDUEL":"PRIZEPICKS"}</span></span>
+        <span class="pstat">${esc(STAT_LABEL[r.stat]||r.stat)} · line <b>${fmt(r.line)}</b>${r.over_odds?` · ${r.over_odds>0?"+":""}${r.over_odds}/${r.under_odds>0?"+":""}${r.under_odds}`:""}</span>
+        <span class="edgebar" aria-hidden="true">
+          <span class="ln"></span>
+          <span class="fill ${over?"over":"under"}" style="${over?`left:50%;width:${half}%`:`right:50%;width:${half}%`}"></span>
+          ${slP!=null?`<span class="pin sl" style="left:${clamp(slP)}%"></span>`:""}
+          ${esP!=null?`<span class="pin es" style="left:${clamp(esP)}%"></span>`:""}
+          <span class="edgenum" style="${over?`left:calc(50% + ${half}% + 6px)`:`right:calc(50% + ${half}% + 6px)`};color:var(--${over?"green":"red"})">${over?"+":"−"}${fmt(Math.abs(e))}</span>
+        </span>
+      </button>
+      <div class="pdet">
+        <p class="say">${say} The model ${MODEL==="avg"?"average":MODEL} is <b class="${over?"green":"red"}">${fmt(Math.abs(e))} ${over?"over":"under"}</b> the number.</p>
+        <p><b>${esc(r.game||"Game TBD")}</b>${r.kickoff?" · "+new Date(r.kickoff).toLocaleString("en-US",{timeZone:TZ,weekday:"short",hour:"numeric",minute:"2-digit"}):""}</p>
+        <p>Black pin is Sleeper, white pin is ESPN, bar is the ${MODEL==="avg"?"average model":"picked model"} gap. Pins left of center mean the model is under the line.</p>
+      </div>`;
+    box.querySelector(".prow").addEventListener("click",()=>{const o=box.classList.toggle("open");box.querySelector(".prow").setAttribute("aria-expanded",String(o))});
+    wrap.appendChild(box);
+  }
+  if(rows.length>400){const p=document.createElement("p");p.className="sec-note";p.textContent=`Showing the 400 biggest edges of ${rows.length}. Filter down for the rest.`;wrap.appendChild(p)}
+}
+async function load(){
+  try{
+    const r=await fetch(`${SB_URL}/rest/v1/latest_board?select=*`,{headers:{apikey:SB_KEY,Authorization:"Bearer "+SB_KEY}});
+    if(!r.ok)throw new Error("board "+r.status);
+    const data=await r.json();
+    ROWS=data;
+    const m=await fetch(`${SB_URL}/rest/v1/runs?select=*&order=id.desc&limit=1`,{headers:{apikey:SB_KEY,Authorization:"Bearer "+SB_KEY}}).then(x=>x.json());
+    META=(m&&m[0])||{};
+  }catch(err){
+    document.getElementById("lede").textContent="The data robot has not published yet. Check back in a few minutes.";
+    return;
+  }
+  const wk=META.week||"-";
+  document.getElementById("bug-week").textContent="WK "+wk+" · "+(META.season||"");
+  const u=META.taken_at?new Date(META.taken_at):null;
+  document.getElementById("bug-upd").textContent=u?("UPD "+u.toLocaleString("en-US",{timeZone:TZ,month:"short",day:"numeric",hour:"numeric",minute:"2-digit"}).toUpperCase()):"";
+  const stats=[...new Set(ROWS.map(r=>r.stat))].sort((a,b)=>(STAT_LABEL[a]||a).localeCompare(STAT_LABEL[b]||b));
+  document.getElementById("sel-stat").innerHTML='<option value="">ALL STATS</option>'+stats.map(s=>`<option value="${s}">${esc((STAT_LABEL[s]||s).toUpperCase())}</option>`).join("");
+  const teams=[...new Set(ROWS.map(r=>r.team).filter(Boolean))].sort();
+  document.getElementById("sel-team").innerHTML='<option value="">ALL TEAMS</option>'+teams.map(t=>`<option>${esc(t)}</option>`).join("");
+  const joined=ROWS.filter(r=>r.sleeper_proj!=null||r.espn_proj!=null).length;
+  document.getElementById("lede").innerHTML=`Every NFL player prop on two free markets, measured against two free projection models. <b>${joined} props</b> have at least one model number. Ranked by the size of the disagreement.`;
+  const c=META.counts||{};
+  document.getElementById("datanote").textContent=`Last pull: ${c.fanduel??"—"} FanDuel lines, ${c.prizepicks??"—"} PrizePicks lines, ${c.sleeper_proj??"—"} Sleeper projections, ${c.espn_proj??"—"} ESPN projections. Props with no model number are hidden by default.`;
+  render();
+}
+document.querySelectorAll(".fbtn").forEach(b=>b.addEventListener("click",()=>{SIDE=b.dataset.side;document.querySelectorAll(".fbtn").forEach(x=>x.classList.toggle("on",x===b));render()}));
+["sel-stat","sel-team","sel-src"].forEach(id=>document.getElementById(id).addEventListener("change",render));
+document.getElementById("sel-model").addEventListener("change",e=>{MODEL=e.target.value;render()});
+load();
+</script>
+</body>
+</html>
