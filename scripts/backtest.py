@@ -59,6 +59,17 @@ HALF_LIFE = 5      # games back at which a game's weight halves
 SHRINK_K = 4       # prior strength, in games, of the position baseline
 MIN_GAMES = 3      # below this the site shows "-" instead of a number
 CALIB_CLAMP = 0.20 # max calibration swing, same guardrail as edge-nfl
+CALIB_KNOT_N = 50  # training pairs near a knot for its full swing; below that the swing shrinks
+MIN_PAIRS = 1000   # walk-forward pairs a stat needs before its curve is published at all.
+                   # 21 isotonic knots fitted on <300 training pairs is ~14 points per knot:
+                   # the clamp saturates on noise and manufactures 90-98% "locks". At 1000+
+                   # pairs (600+ in the fit window, 30+ per knot) the curve is estimable.
+                   # Every stat below this gate scored at or under chance on the 2025 holdout.
+# Counting stats that are mostly 0/1/2 in a game: a normal CDF is the wrong shape for
+# them (it cannot respect the integer support and floors the sd at a constant). Poisson
+# on the player's own weighted mean is the minimal honest alternative.
+COUNT_STATS = {"pass_tds", "pass_int", "rush_tds", "rec_tds", "any_td"}
+P_FLOOR, P_CEIL = 0.02, 0.98
 SIGMA_FLOOR = {"pass_yds":45,"pass_tds":0.55,"pass_att":5,"pass_comp":4,"pass_int":0.5,
                "rush_yds":16,"rush_tds":0.35,"rush_att":3,"rec_yds":16,"rec":1.4,
                "rec_tds":0.32,"rec_tgt":2,"rush_rec_yds":20,"pass_rush_yds":50,"any_td":0.4}
@@ -231,9 +242,12 @@ def build_logs(rows):
     """Per player: position + per-stat ordered series of (seq, value).
     A week counts when the feed returned any played stat for the player
     (placeholder rows are skipped). Inside a played week, a stat the player
-    records at some point in the season but not this week is a 0. Combo stats
-    zero-fill each component the same way. Weeks with no game simply do not
-    appear (props are graded on games played)."""
+    has recorded in THIS week or any EARLIER one but not this week is a 0.
+    The prefix-only rule matters: keying the zero-fill off the full season
+    would let a week-14 carry decide whether week 3 counts a rushing 0, and
+    that pooled series feeds the position baselines. Combo stats zero-fill
+    each component the same way. Weeks with no game simply do not appear
+    (props are graded on games played)."""
     by_player = {}
     for a in rows:
         k = norm_name(a["player"])
@@ -247,9 +261,9 @@ def build_logs(rows):
     logs = {}
     for k, bp in by_player.items():
         ever = set()
-        for wk in bp["weeks"].values(): ever |= set(wk)
         stats = {}
-        for seq, wk in bp["weeks"].items():
+        for seq, wk in sorted(bp["weeks"].items()):
+            ever |= set(wk)
             for t in STATS:
                 if t in ever:
                     stats.setdefault(t, {})[seq] = wk.get(t, 0.0)
@@ -273,8 +287,29 @@ def wstats(vals):
     return mean, math.sqrt(var) if var > 0 else 0.0
 
 def p_over(mean, sigma, line):
-    if sigma <= 0: return 0.99 if mean > line else 0.01
-    return 0.5 * (1 + math.erf((mean - line) / (sigma * math.sqrt(2))))
+    """P(X > line) under a normal, clamped to the band the site displays."""
+    if sigma <= 0: p = 1.0 if mean > line else 0.0
+    else: p = 0.5 * (1 + math.erf((mean - line) / (sigma * math.sqrt(2))))
+    return max(P_FLOOR, min(P_CEIL, p))
+
+def p_over_poisson(mean, line):
+    """P(X > line) for a Poisson count. X > line means X >= ceil(line) when the
+    line is fractional, and X >= line+1 when it is a whole number."""
+    lam = max(mean, 1e-6)
+    k = math.ceil(line) - 1 if line != int(line) else int(line)
+    if k < 0: return P_CEIL
+    if lam > 700 or k > 2000: return P_CEIL
+    cdf, term = 0.0, math.exp(-lam)
+    for i in range(k + 1):
+        if i: term *= lam / i
+        cdf += term
+    return max(P_FLOOR, min(P_CEIL, 1.0 - cdf))
+
+def p_hit(stat, mean, sigma, line):
+    """The one place the over-probability is defined. index.html mirrors this;
+    payload.player_model.dist tells the frontend which branch a stat takes."""
+    if stat in COUNT_STATS: return p_over_poisson(mean, line)
+    return p_over(mean, sigma, line)
 
 class Baselines:
     """Pooled per-(pos, stat) distribution with prefix sums so a walk-forward
@@ -348,23 +383,60 @@ def interp(x, y, p):
     span = x[hi] - x[lo] or 1
     return y[lo] + (p - x[lo]) / span * (y[hi] - y[lo])
 
-def fit_calibration(pairs):
+def fit_calibration(pairs, min_pairs=None):
     """pairs: (raw_p, outcome 0/1). Returns fitted knots and in-fit diagnostics.
-    Honest held-out diagnostics are computed separately by player_model()."""
-    if len(pairs) < 150: return None
+    Honest held-out diagnostics are computed separately by player_model().
+
+    Two guardrails beyond the +/-0.20 swing clamp:
+      * a knot's swing is scaled by how many training pairs actually sit near it
+        (full swing at CALIB_KNOT_N, proportionally less below), so a knot backed
+        by a handful of points cannot move the probability the full 20 points;
+      * the result is forced monotone after shrinking.
+    Without the first guardrail the 2025 fit put cal(0.75)=0.95 on four passing
+    stats off ~15 points per knot - locks invented from noise."""
+    if len(pairs) < (MIN_PAIRS if min_pairs is None else min_pairs): return None
     bx, by = isotonic_xy(pairs)
-    knots_x = [0.02] + [i / 20 for i in range(1, 20)] + [0.98]
+    knots_x = [P_FLOOR] + [i / 20 for i in range(1, 20)] + [P_CEIL]
     knots_y = []
     for kx in knots_x:
         iso = interp(bx, by, kx)
         swing = max(-CALIB_CLAMP, min(CALIB_CLAMP, iso - kx))
-        knots_y.append(round(max(0.02, min(0.98, kx + swing)), 3))
-    def cal(p): return interp(knots_x, knots_y, max(0.02, min(0.98, p)))
+        near = sum(1 for p, _ in pairs if abs(p - kx) <= 0.05)
+        swing *= min(1.0, near / CALIB_KNOT_N)
+        knots_y.append(round(max(P_FLOOR, min(P_CEIL, kx + swing)), 3))
+    for i in range(1, len(knots_y)):
+        if knots_y[i] < knots_y[i - 1]: knots_y[i] = knots_y[i - 1]
+    def cal(p): return interp(knots_x, knots_y, p)
     brier = sum((cal(p) - o) ** 2 for p, o in pairs) / len(pairs)
     ll = sum(-(o * math.log(max(cal(p), 1e-9)) + (1 - o) * math.log(max(1 - cal(p), 1e-9)))
              for p, o in pairs) / len(pairs)
     return {"x": [round(v, 3) for v in knots_x], "y": knots_y,
             "brier": round(brier, 4), "logloss": round(ll, 4)}
+
+def auc(pairs):
+    """Rank discrimination: P(a random over-hit scored higher than a random miss).
+    0.50 is a coin flip. This is the number the pair-count gate protects - a
+    Brier that only looks good because the base rate was learned is not skill."""
+    ps = sorted(range(len(pairs)), key=lambda i: pairs[i][0])
+    ranks = [0.0] * len(pairs); i = 0
+    while i < len(ps):
+        j = i
+        while j + 1 < len(ps) and pairs[ps[j + 1]][0] == pairs[ps[i]][0]: j += 1
+        r = (i + j) / 2 + 1
+        for k in range(i, j + 1): ranks[ps[k]] = r
+        i = j + 1
+    n1 = sum(1 for _, o in pairs if o == 1); n0 = len(pairs) - n1
+    if not n1 or not n0: return None
+    rsum = sum(ranks[i] for i, (_, o) in enumerate(pairs) if o == 1)
+    return round((rsum - n1 * (n1 + 1) / 2) / (n1 * n0), 4)
+
+def brier_const(train, test):
+    """The only honest null for a market this lopsided: predict the training
+    period's base rate for everything. Beating a constant 0.5, or beating the
+    position-baseline model, is not evidence the player curves know anything."""
+    if not train or not test: return None
+    b = sum(o for _, o in train) / len(train)
+    return round(sum((b - o) ** 2 for _, o in test) / len(test), 4), round(b, 4)
 
 def player_model(logs, sp):
     """Walk-forward grade on 2025 (line = Sleeper projection as the market
@@ -404,39 +476,50 @@ def player_model(logs, sp):
                         out = 1 if val > line else 0
                         base = bl.query(pos, t, before_seq=seq)
                         m, s, _ = blend(prior, base, t)
-                        pairs.setdefault(t, []).append((seq, p_over(m, s, line), out))
+                        pairs.setdefault(t, []).append((seq, p_hit(t, m, s, line), out))
                         if base is not None:
-                            pairs_lg.setdefault(t, []).append((seq, p_over(base[1], max(base[2], SIGMA_FLOOR.get(t, 1)), line), out))
+                            pairs_lg.setdefault(t, []).append((seq, p_hit(t, base[1], max(base[2], SIGMA_FLOOR.get(t, 1)), line), out))
             ever_pre |= set(raw)
     grade = {}
     all_pairs, all_lg = [], []
+    published = []
     for t in ALL_STATS:
         trip = pairs.get(t) or []
-        if len(trip) < 150: continue
+        if len(trip) < 150: continue   # below this there is nothing to report at all
         lgtrip = pairs_lg.get(t) or []
         prs = [(p, o) for _, p, o in trip]
         lg = [(p, o) for _, p, o in lgtrip]
-        fit = fit_calibration(prs)  # full-season curve is the production calibrator
+        # A stat is published (curve + calibration shipped to the board) only with
+        # enough walk-forward pairs to estimate a 21-knot curve and test it.
+        pub = len(trip) >= MIN_PAIRS
         brier_raw = sum((p - o) ** 2 for p, o in prs) / len(prs)
-        entry = {"n": len(prs), "brier_raw": round(brier_raw, 4)}
+        entry = {"n": len(prs), "brier_raw": round(brier_raw, 4), "published": pub,
+                 "dist": "poisson" if t in COUNT_STATS else "normal"}
         if lg:
             entry["brier_league"] = round(sum((p - o) ** 2 for p, o in lg) / len(lg), 4)
         # Honest temporal holdout: fit calibration on W1-12, score it on W13-18.
         train = [(p, o) for seq, p, o in trip if seq <= 202512]
         test = [(p, o) for seq, p, o in trip if seq >= 202513]
         lgtest = [(p, o) for seq, p, o in lgtrip if seq >= 202513]
-        hfit = fit_calibration(train)
+        hfit = fit_calibration(train, min_pairs=150)
         if hfit and len(test) >= 30:
             cp = [interp(hfit["x"], hfit["y"], p) for p, _ in test]
             entry.update({"holdout_n": len(test),
                           "holdout_brier_raw": round(sum((p-o)**2 for p,o in test)/len(test), 4),
                           "holdout_brier": round(sum((p-o)**2 for p,(_,o) in zip(cp,test))/len(test), 4),
-                          "holdout_logloss": round(sum(-(o*math.log(max(p,1e-9))+(1-o)*math.log(max(1-p,1e-9))) for p,(_,o) in zip(cp,test))/len(test), 4)})
+                          "holdout_logloss": round(sum(-(o*math.log(max(p,1e-9))+(1-o)*math.log(max(1-p,1e-9))) for p,(_,o) in zip(cp,test))/len(test), 4),
+                          "holdout_auc": auc(test)})
+            bc = brier_const(train, test)
+            if bc:
+                entry["holdout_brier_base_rate"], entry["train_over_rate"] = bc
+                entry["holdout_skill_vs_base_rate"] = round((1 - entry["holdout_brier"] / bc[0]) * 100, 2)
             if lgtest:
                 entry["holdout_brier_league"] = round(sum((p-o)**2 for p,o in lgtest)/len(lgtest), 4)
+        fit = fit_calibration(prs) if pub else None   # full-season curve, production calibrator
         if fit:
             entry.update({"calib_x": fit["x"], "calib_y": fit["y"]})
         grade[t] = entry
+        if pub: published.append(t)
         all_pairs += trip; all_lg += lgtrip
     if all_pairs:
         prs = [(p, y) for _, p, y in all_pairs]
@@ -454,11 +537,17 @@ def player_model(logs, sp):
                       "holdout_brier":round(sum((p-y)**2 for p,(_,y) in zip(cp,test))/len(test),4),
                       "holdout_logloss":round(sum(-(y*math.log(max(p,1e-9))+(1-y)*math.log(max(1-p,1e-9))) for p,(_,y) in zip(cp,test))/len(test),4)})
             if lgtest: o["holdout_brier_league"] = round(sum((p-y)**2 for p,y in lgtest)/len(lgtest),4)
+            o["holdout_auc"] = auc(test)
+            bc = brier_const(train, test)
+            if bc:
+                o["holdout_brier_base_rate"], o["train_over_rate"] = bc
+                o["holdout_skill_vs_base_rate"] = round((1 - o["holdout_brier"] / bc[0]) * 100, 2)
         grade["_all"] = o
     # live curves from full logs
     curves = {}
     bases = {}
     for t in ALL_STATS:
+        if t not in published: continue   # unvalidated stat: ship no curve, board shows "-"
         cstat = {}
         for k, lg in logs.items():
             series = lg["stats"].get(t)
@@ -472,7 +561,7 @@ def player_model(logs, sp):
             b = bl.query(pos, t)
             if b: bstat[pos] = [b[0], round(b[1], 2), round(b[2], 2)]
         if bstat: bases[t] = bstat
-    return grade, curves, bases
+    return grade, curves, bases, published
 
 # 2026 week math (mirrors collect.py): feeds label the Sep 9-14 slate week 2.
 def finished_feed_weeks_2026():
@@ -511,25 +600,45 @@ def main():
             print(f"  sleeper 2026 actuals failed: {e}", file=sys.stderr)
     logs = build_logs(sa + sa26)
     print(f"== player model: {len(logs)} players ==", file=sys.stderr)
-    pgrade, curves, bases = player_model(logs, sp)
+    pgrade, curves, bases, published = player_model(logs, sp)
     result["player_curves"] = curves
     result["player_baselines"] = bases
     result["player_model_grade"] = pgrade
+    result["player_model_published"] = published
     result["player_model"] = {
         "method": ("A player's over/under chance comes from his own game log: the recency-weighted "
                    "average and spread of his weekly numbers (a game five weeks back counts about half "
                    "of last week), blended toward his position's league average when he has played few "
                    "games - his own games take over as they pile up. Under 3 recorded games: no number, "
                    "shown as -. The raw chance is then corrected by a per-stat calibration fitted on "
-                   "2025 results, with the correction capped at 20 points so thin stats cannot produce "
-                   "fake locks. Graded on his own games; league average fills the gaps."),
+                   "2025 results, with the correction capped at 20 points and further shrunk where a "
+                   "knot has little data behind it. A stat is only published when its 2025 walk-forward "
+                   "sample is big enough to fit and test that curve; the rest show - on the board."),
         "half_life_games": HALF_LIFE, "shrink_prior_games": SHRINK_K, "min_games": MIN_GAMES,
-        "calib_clamp": CALIB_CLAMP,
+        "calib_clamp": CALIB_CLAMP, "calib_knot_n": CALIB_KNOT_N, "min_pairs": MIN_PAIRS,
+        "p_floor": P_FLOOR, "p_ceil": P_CEIL,
+        "published_stats": published,
+        "dist": {t: ("poisson" if t in COUNT_STATS else "normal") for t in ALL_STATS},
         "backtest_line_source": "Sleeper weekly projection used as the market-line proxy (no verified 2025 sportsbook line archive found yet).",
-        "grade_protocol": "Walk-forward player inputs (only earlier games); calibration temporal holdout fits W1-12 and scores W13-18. Full-season calibration knots are for 2026 production.",
-        "usage": ("hit% for a prop = calib_interp(p_over(m, s, line)) where [n, m, s] = player_curves[stat][norm_name(player)]. "
-                  "norm_name: lowercase, strip accents, remove . ' and hyphens, drop suffixes jr/sr/ii/iii/iv/v, collapse spaces. "
-                  "Missing player or stat, or no calib curve for the stat: fall back to raw p_over (bounded 0.02-0.98); missing player entirely: show -.")}
+        "line_proxy_caveat": ("The calibration is fitted against Sleeper projections, not sportsbook lines, "
+                              "and the two are not the same market. Against Sleeper's 2025 rushing-yards "
+                              "projections the over hit only 32% of the time, so the fitted curve maps a "
+                              "raw 50% to about 33%. A real sportsbook line is priced near 50/50, so that "
+                              "shift is a property of Sleeper's bias, not of the player. Treat every "
+                              "published probability as calibrated to the proxy until the 2026 live record "
+                              "(live_grades) is deep enough to refit against real market lines."),
+        "grade_protocol": ("Walk-forward player inputs (only earlier games, and the zero-fill for a week "
+                           "uses only that week and earlier ones); calibration temporal holdout fits W1-12 "
+                           "and scores W13-18. Full-season calibration knots are for 2026 production. "
+                           "holdout_brier_base_rate is the null that matters: a constant equal to the "
+                           "training period's over-rate. holdout_auc under 0.50 means no rank skill at all."),
+        "usage": ("hit% for a prop = calib_interp(p_hit(stat, m, s, line)) where [n, m, s] = "
+                  "player_curves[stat][norm_name(player)] and p_hit is the normal CDF, or a Poisson CDF "
+                  "for stats listed as poisson in dist, clamped to 0.02-0.98. "
+                  "norm_name: NFKD-normalize, drop every non-ASCII character, lowercase, remove . ' and "
+                  "hyphens, drop suffixes jr/sr/ii/iii/iv/v, collapse spaces. "
+                  "A stat absent from player_curves is not published - show - and say the model is not "
+                  "validated for it. Player absent from a published stat: show - (under 3 games).")}
     result["note_2026"] = ("The 2026 season opens Sep 9, so no 2026 weeks are graded here. "
         "This season's record builds week by week in the live-grades table as games finish.")
     with open("out/backtest.json", "w") as f:

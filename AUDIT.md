@@ -1,5 +1,15 @@
 # Player-level model audit
 
+> **Superseded in part by `REVIEW.md` (independent review, same date).** The
+> arithmetic below reproduces exactly, but three of its conclusions do not
+> survive: the baselines it calls honest still carried a zero-fill leak
+> (REVIEW M1), the "beats the league baseline" framing uses the wrong null
+> (REVIEW C1 — against a base-rate constant the gain is +1.96%, not 0.2804 vs
+> 0.2407), and the `normName` cross-check in §5 fails on a typographic
+> apostrophe (REVIEW C4). The publish gate, Poisson counts and calibration
+> guardrails described in REVIEW (c) are now in the code, so the per-stat
+> table below describes the *previous* model. Read REVIEW.md first.
+
 Date: 2026-09-08. Covers `scripts/backtest.py` (player model), the board wiring in
 `index.html`, and the docs in `method.html`.
 

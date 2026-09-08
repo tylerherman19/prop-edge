@@ -55,3 +55,12 @@ create policy "public read runs" on runs for select to anon using (true);
 create policy "public read edges" on edges for select to anon using (true);
 create policy "public read backtest" on backtest for select to anon using (true);
 create policy "public read grades" on live_grades for select to anon using (true);
+
+-- ---------------------------------------------------------------------------
+-- Migration (safe to re-run): the live record grades the player-model side too,
+-- so the Accuracy page can validate the number the board actually prints and
+-- not only the projection-gap side. collect.py falls back to inserting without
+-- these columns until this block has been run.
+alter table live_grades add column if not exists model_p numeric;
+alter table live_grades add column if not exists model_side text;
+alter table live_grades add column if not exists model_hit boolean;

@@ -39,8 +39,10 @@
 <div id="board"></div>
 <p class="note" id="datanote"></p>
 <section class="colophon">
-<p>Every prop is priced both ways, like a prediction market. The two percentages come from the player's own game log - recency-weighted, shrunk toward his position's league average when he's played few, then calibrated on 2025 results. <b>Model pick</b> marks the side his log favors. The estimate underneath is this week's Sleeper/ESPN projection, a separate signal - when the two disagree, you see both and make the call.</p>
-<p><b>Edge</b> is the default sort: hit-chance confidence times the model-vs-line disagreement, measured in the player's own spread. A big gap the player's log agrees with outranks a coin flip with a huge gap. Hit% and Gap sorts are still there when you want one signal at a time.</p>
+<p>Every prop is priced both ways, like a prediction market. The two percentages come from the player's own game log - recency-weighted, shrunk toward his position's league average when he's played few, then calibrated on 2025 results. <b>Model pick</b> marks the side his log favors. The estimate underneath is this week's Sleeper/ESPN projection, a separate signal - when the two disagree, the card says so and you make the call.</p>
+<p><b>Only six stats carry a percentage</b> - rushing yards, rush attempts, receiving yards, receptions, targets, and rush+rec yards. Those are the ones with enough 2025 props to fit and test a curve. Passing stats, interceptions and touchdown props show a dash: the same test said the model was no better than a coin flip there, so the board prints nothing rather than a number it cannot stand behind. The Accuracy page shows that test.</p>
+<p><b>Read the percentages as calibrated to a proxy.</b> No free archive of 2025 sportsbook lines exists, so the calibration was fitted against Sleeper's projections standing in for the line. Sleeper runs high on rushing, so the fitted curve shades toward the under - which is why far more props read "Vegas advantage" than the other way. That tilt is a property of the proxy, not a read on this week's market.</p>
+<p><b>Edge</b> is the default sort: hit-chance confidence times the model-vs-line disagreement, measured in the player's own spread. It rewards size of disagreement, not agreement between the two signals, so check the card. Hit% and Gap sorts are there when you want one signal at a time.</p>
 <p>A big gap is a disagreement, not a guarantee. Nothing here is betting advice - it is arithmetic on free public data.</p>
 </section>
 </main>
@@ -50,12 +52,18 @@ const SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
 const TZ = "America/Chicago";
 const STAT_LABEL = {pass_yds:"Passing yards",pass_tds:"Passing TDs",pass_att:"Pass attempts",pass_comp:"Completions",pass_int:"Interceptions",rush_yds:"Rushing yards",rush_tds:"Rushing TDs",rush_att:"Rush attempts",rec_yds:"Receiving yards",rec:"Receptions",rec_tds:"Receiving TDs",rec_tgt:"Targets",rush_rec_yds:"Rush + receiving yards",pass_rush_yds:"Pass + rush yards",long_rec:"Longest reception",long_rush:"Longest rush",long_comp:"Longest completion",any_td:"Touchdowns"};
 const UNIT = {pass_yds:"yards",pass_tds:"touchdowns",pass_att:"attempts",pass_comp:"completions",pass_int:"interceptions",rush_yds:"yards",rush_tds:"touchdowns",rush_att:"carries",rec_yds:"yards",rec:"receptions",rec_tds:"touchdowns",rec_tgt:"targets",rush_rec_yds:"yards",pass_rush_yds:"yards",long_rec:"yards",long_rush:"yards",long_comp:"yards",any_td:"touchdowns"};
-const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const fmt=(n,d=1)=>n==null?"—":Number(n).toLocaleString("en-US",{maximumFractionDigits:d});
-let ROWS=[], META={}, SIDE="all", MODEL="avg", PC=null, PG=null, SORT="edge";
+let ROWS=[], META={}, SIDE="all", MODEL="avg", PC=null, PG=null, SORT="edge", PM=null;
 
+// Mirrors norm_name() in scripts/backtest.py. Python does
+// NFKD -> encode("ascii","ignore"), which drops EVERY non-ASCII code point, not
+// just combining marks: a curly apostrophe (U+2019) and an undecomposable letter
+// (o-slash) both vanish there. Stripping only \u0300-\u036f here left
+// "Ja<U+2019>Marr Chase" as a different key in JS than in Python and silently
+// lost that player's curve, so drop all non-ASCII the same way.
 function normName(s){
-  return String(s||"").normalize("NFKD").replace(/[\u0300-\u036f]/g,"")
+  return String(s||"").normalize("NFKD").replace(/[^\x00-\x7f]/g,"")
     .toLowerCase().replace(/\./g,"").replace(/'/g,"").replace(/-/g," ")
     .replace(/\b(jr|sr|ii|iii|iv|v)\b\.?/g,"").replace(/\s+/g," ").trim();
 }
@@ -72,11 +80,24 @@ function interpCalib(xs,ys,p){
   const span=(xs[hi]-xs[lo])||1;
   return ys[lo]+(p-xs[lo])/span*(ys[hi]-ys[lo]);
 }
+// P(X > line) for a Poisson count -- mirrors p_over_poisson() in backtest.py.
+function poisOver(mean,line){
+  const lam=Math.max(mean,1e-6);
+  const k=(line!==Math.floor(line))?Math.ceil(line)-1:line;
+  if(k<0)return 0.98;
+  let cdf=0,term=Math.exp(-lam);
+  for(let i=0;i<=k;i++){if(i)term*=lam/i;cdf+=term;}
+  return Math.max(0.02,Math.min(0.98,1-cdf));
+}
+// A stat missing from player_curves was not published: its 2025 walk-forward
+// sample was too small to fit and test a curve, so there is no honest number.
+function statPublished(stat){return !!(PC&&PC[stat]);}
 function playerHit(r){
-  if(!PC)return null;
-  const st=PC[r.stat]; if(!st)return null;
-  const c=st[normName(r.player)]; if(!c)return null;
-  let p=0.5*(1+erf((c[1]-r.line)/(c[2]*Math.SQRT2)));
+  if(!statPublished(r.stat))return null;
+  const c=PC[r.stat][normName(r.player)]; if(!c)return null;
+  const dist=(PM&&PM.dist&&PM.dist[r.stat])||"normal";
+  let p=dist==="poisson"?poisOver(c[1],r.line)
+                        :0.5*(1+erf((c[1]-r.line)/(c[2]*Math.SQRT2)));
   p=Math.max(0.02,Math.min(0.98,p));
   const g=PG&&PG[r.stat];
   if(g&&g.calib_x&&g.calib_y&&g.calib_x.length)p=interpCalib(g.calib_x,g.calib_y,p);
@@ -126,11 +147,13 @@ function render(){
     const hp=h==null?null:Math.round(h.p*100);
     const up=h==null?null:Math.round((1-h.p)*100);
     const pickOver=h?h.p>=0.5:(gap!=null&&gap>0);
+    const noStat=!statPublished(r.stat);
     const say = h==null
-      ? `${esc(r.player)}: the model says <b>${fmt(p)}</b>, the line is <b>${fmt(r.line)}</b>${gap==null?"":` - that is <b>${fmt(Math.abs(gap))} ${unit}</b> ${gap>0?"above":"under"} the number`}. No player curve yet, so no honest hit chance.`
+      ? `${esc(r.player)}: the model says <b>${fmt(p)}</b>, the line is <b>${fmt(r.line)}</b>${gap==null?"":` - that is <b>${fmt(Math.abs(gap))} ${unit}</b> ${gap>0?"above":"under"} the number`}. ${noStat?"The player model is not validated for this stat, so there is no hit chance to show.":"No player curve yet, so no honest hit chance."}`
       : you
       ? `${esc(r.player)}: across <b>${h.n}</b> of his own tracked games he averages <b>${fmt(h.m)}</b> ${unit} - that clears the <b>${fmt(r.line)}</b> line <b>${hp}%</b> of the time. Your advantage.`
-      : `${esc(r.player)}: across <b>${h.n}</b> of his own tracked games he averages <b>${fmt(h.m)}</b> ${unit} - that stays under the <b>${fmt(r.line)}</b> line <b>${hp}%</b> of the time. Vegas advantage.`;
+      // hp is the OVER chance; the under sentence needs its complement (up).
+      : `${esc(r.player)}: across <b>${h.n}</b> of his own tracked games he averages <b>${fmt(h.m)}</b> ${unit} - that stays under the <b>${fmt(r.line)}</b> line <b>${up}%</b> of the time. Vegas advantage.`;
     const slT=r.sleeper_proj!=null?`Sleeper says <b>${fmt(r.sleeper_proj)}</b>`:"No Sleeper number";
     const esT=r.espn_proj!=null?`ESPN says <b>${fmt(r.espn_proj)}</b>`:"no ESPN number";
     const box=document.createElement("div");box.className="prop";
@@ -162,7 +185,10 @@ function render(){
       <div class="pdet">
         <p class="psay">${say}</p>
         <p>${slT} · ${esT}. Showing the ${MODEL==="avg"?"average of the two":MODEL} estimate.</p>
-        ${h?`<p>Hit chance basis: <b>${h.n}</b> of his tracked ${esc(statL.toLowerCase())} games (avg ${fmt(h.m)}, spread ${fmt(h.s)}), recency-weighted and shrunk toward his position's league average, then calibrated on 2025 results. The Method page explains the math.</p>`:`<p>No player curve for ${esc(r.player)} on this stat yet (under 3 tracked games), so no honest hit chance - the gap is still real arithmetic.</p>`}
+        ${h?`<p>Hit chance basis: <b>${h.n}</b> of his tracked ${esc(statL.toLowerCase())} games (avg ${fmt(h.m)}, spread ${fmt(h.s)}), recency-weighted and shrunk toward his position's league average, then calibrated on 2025 results. Calibrated against Sleeper's projections, not against real sportsbook lines - the Method page explains what that does and does not buy you.</p>`
+            :noStat?`<p>No hit chance for ${esc(statL.toLowerCase())}. On the 2025 walk-forward test this stat had too few graded props to fit and check a curve, and the model scored at or below a coin flip on it - so the board shows nothing rather than a number it cannot stand behind. The gap above is still real arithmetic.</p>`
+                   :`<p>No player curve for ${esc(r.player)} on this stat yet (under 3 tracked games), so no honest hit chance - the gap is still real arithmetic.</p>`}
+        ${h&&gap!=null&&Math.abs(gap)>0.05&&((h.p>=0.5)!==(gap>0))?`<p><b>These two signals disagree.</b> His game log points ${h.p>=0.5?"over":"under"} while this week's projection points ${gap>0?"over":"under"}. The hit% only knows his history; the projection is the only part that knows this week's matchup and role.</p>`:""}
         ${r.game?`<p><b>${esc(r.game)}</b>${k?" · "+esc(k):""}${r.over_odds?` · ${r.over_odds>0?"+":""}${r.over_odds}/${r.under_odds>0?"+":""}${r.under_odds}`:""}</p>`:(k?`<p><b>${esc(k)}</b>${r.over_odds?` · ${r.over_odds>0?"+":""}${r.over_odds}/${r.under_odds>0?"+":""}${r.under_odds}`:""}</p>`:"")}
       </div>`;
     box.querySelector(".prow").addEventListener("click",()=>{const o=box.classList.toggle("open");box.querySelector(".prow").setAttribute("aria-expanded",String(o))});
@@ -172,7 +198,11 @@ function render(){
 }
 async function load(){
   try{
-    const r=await fetch(`${SB_URL}/rest/v1/latest_board?select=*`,{headers:{apikey:SB_KEY,Authorization:"Bearer "+SB_KEY}});
+    // league=eq.nfl: latest_board carries the newest run PER LEAGUE, so an
+    // unfiltered read also pulls the CFB rows. limit: PostgREST caps a request
+    // at 1000 rows by default, which was silently dropping ~40% of the board
+    // (1672 rows in the view, 1000 returned) and skewing the counts below.
+    const r=await fetch(`${SB_URL}/rest/v1/latest_board?select=*&league=eq.nfl&limit=5000`,{headers:{apikey:SB_KEY,Authorization:"Bearer "+SB_KEY}});
     if(!r.ok)throw new Error("board "+r.status);
     const data=await r.json();
     ROWS=data;
@@ -180,7 +210,7 @@ async function load(){
     META=(m&&m[0])||{};
     const bt=await fetch(`${SB_URL}/rest/v1/backtest?select=payload&id=eq.latest`,{headers:{apikey:SB_KEY,Authorization:"Bearer "+SB_KEY}}).then(x=>x.json());
     const pl=(bt&&bt[0]&&bt[0].payload)||{};
-    PC=pl.player_curves||null; PG=pl.player_model_grade||null;
+    PC=pl.player_curves||null; PG=pl.player_model_grade||null; PM=pl.player_model||null;
   }catch(err){
     document.getElementById("lede").textContent="The data robot has not published yet. Check back in a few minutes.";
     return;
@@ -190,16 +220,24 @@ async function load(){
   const u=META.taken_at?new Date(META.taken_at):null;
   document.getElementById("bug-upd").textContent=u?("UPD "+u.toLocaleString("en-US",{timeZone:TZ,month:"short",day:"numeric",hour:"numeric",minute:"2-digit"}).toUpperCase()):"";
   const stats=[...new Set(ROWS.map(r=>r.stat))].sort((a,b)=>(STAT_LABEL[a]||a).localeCompare(STAT_LABEL[b]||b));
-  document.getElementById("sel-stat").innerHTML='<option value="">ALL STATS</option>'+stats.map(s=>`<option value="${s}">${esc((STAT_LABEL[s]||s).toUpperCase())}</option>`).join("");
+  document.getElementById("sel-stat").innerHTML='<option value="">ALL STATS</option>'+stats.map(s=>`<option value="${esc(s)}">${esc((STAT_LABEL[s]||s).toUpperCase())}</option>`).join("");
   const teams=[...new Set(ROWS.map(r=>r.team).filter(Boolean))].sort();
   document.getElementById("sel-team").innerHTML='<option value="">ALL TEAMS</option>'+teams.map(t=>`<option>${esc(t)}</option>`).join("");
   const joined=ROWS.filter(r=>r.sleeper_proj!=null||r.espn_proj!=null).length;
-  document.getElementById("lede").innerHTML=`Every NFL player prop on two free markets, priced like a prediction market: <b>${joined} props</b> with a model number, a gap, and a hit chance. Ranked by edge - the biggest disagreements with the highest hit rates first.`;
+  const priced=ROWS.filter(r=>playerHit(r)!=null).length;
+  document.getElementById("lede").innerHTML=`Every NFL player prop on two free markets: <b>${joined} props</b> with a model number and a gap. <b>${priced}</b> of them also carry a hit chance - the six stats where the 2025 test says the player model earned one. Ranked by edge.`;
   const c=META.counts||{};
-  document.getElementById("datanote").textContent=`Last pull: ${c.fanduel??"—"} FanDuel lines, ${c.prizepicks??"—"} PrizePicks lines, ${c.sleeper_proj??"—"} Sleeper projections, ${c.espn_proj??"—"} ESPN projections. Props with no model number are hidden by default.`;
+  document.getElementById("datanote").textContent=`Last pull: ${c.fanduel??"—"} FanDuel lines, ${c.prizepicks??"—"} PrizePicks lines, ${c.sleeper_proj??"—"} Sleeper projections, ${c.espn_proj??"—"} ESPN projections. NFL only; props with no model number are hidden by default.`;
   render();
 }
-document.querySelectorAll(".fbtn").forEach(b=>b.addEventListener("click",()=>{SIDE=b.dataset.side;document.querySelectorAll(".fbtn").forEach(x=>x.classList.toggle("on",x===b));render()}));
+// Scope each handler to its own group. ".fbtn" also matched the sort buttons,
+// so a click on SORT: HIT% set SIDE to undefined and the side filter then kept
+// only props with h.p < 0.5 -- every over-side prop vanished from the board.
+document.querySelectorAll(".fbtn:not(.srt)").forEach(b=>b.addEventListener("click",()=>{
+  SIDE=b.dataset.side;
+  document.querySelectorAll(".fbtn:not(.srt)").forEach(x=>x.classList.toggle("on",x===b));
+  render();
+}));
 document.querySelectorAll(".fbtn.srt").forEach(b=>b.addEventListener("click",()=>{
   SORT=b.dataset.sort;
   document.querySelectorAll(".fbtn.srt").forEach(x=>x.classList.toggle("on",x===b));
