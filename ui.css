@@ -40,6 +40,18 @@ body{background:var(--paper);color:var(--ink);font-family:"Archivo",sans-serif;f
 .phead .tm{font-size:11px;font-weight:700;letter-spacing:.08em;color:var(--muted)}
 .phead .src{margin-left:auto;font-size:10px;font-weight:700;letter-spacing:.12em;color:var(--muted);border:1px solid var(--faint);padding:2px 6px}
 .pstat{font-size:12px;color:var(--muted);padding:2px 0 8px}
+.adv{display:inline-block;font-size:9px;font-weight:800;letter-spacing:.1em;padding:2px 5px;border:1px solid;vertical-align:1px;margin-left:4px}
+.adv.you{color:var(--green);border-color:var(--green)}
+.adv.vegas{color:var(--red);border-color:var(--red)}
+.pgrid{display:grid;grid-template-columns:repeat(4,1fr);margin-top:6px;border-top:1px solid var(--faint);border-bottom:1px solid var(--faint)}
+.pgrid>span{padding:8px 4px 9px;border-right:1px solid var(--faint);text-align:center}
+.pgrid>span:last-child{border-right:0}
+.pgrid small{display:block;font-size:9px;font-weight:700;letter-spacing:.08em;color:var(--muted)}
+.pgrid b{display:block;margin-top:3px;font-size:16px;font-weight:700;color:var(--ink)}
+.pgrid .g-you b{color:var(--green)}
+.pgrid .g-vegas b{color:var(--red)}
+.psay{display:block;padding-top:10px;font-size:13px;line-height:19px;color:var(--ink)}
+.psay b{font-weight:700}
 .pstat b{color:var(--ink)}
 .pmid{display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;font-size:12px}
 .pmid .cell small{display:block;font-size:10px;font-weight:700;letter-spacing:.1em;color:var(--muted)}
@@ -50,11 +62,6 @@ body{background:var(--paper);color:var(--ink);font-family:"Archivo",sans-serif;f
 .edgebar .fill{position:absolute;top:4px;bottom:4px}
 .edgebar .fill.over{background:var(--green)}
 .edgebar .fill.under{background:var(--red)}
-.edgebar .pin{position:absolute;top:2px;bottom:2px;width:2px}
-.edgebar .pin.sl{background:var(--ink)}
-.edgebar .pin.es{background:#fff;box-shadow:0 0 0 1px var(--ink)}
-.edgenum{position:absolute;top:2px;font-size:11px;font-weight:800;letter-spacing:.04em;z-index:3;background:var(--paper);padding:0 2px}
-.edgenum.in{background:transparent;padding:0}
 .pdet{display:none;padding:0 12px 12px;font-size:13px;line-height:20px}
 .prop.open .pdet{display:block}
 .pdet p{padding:6px 0;border-top:1px solid var(--faint)}
@@ -62,6 +69,12 @@ body{background:var(--paper);color:var(--ink);font-family:"Archivo",sans-serif;f
 .pdet .say b.green{color:var(--green)}
 .pdet .say b.red{color:var(--red)}
 /* accuracy */
+.accrow{border-bottom:1px solid var(--faint);padding:12px 16px}
+.accrow .st{font-weight:700;font-size:13px;letter-spacing:.04em;padding-bottom:4px}
+.accrow .line{display:flex;gap:8px;align-items:baseline;padding:3px 0;font-size:13px;line-height:18px;color:var(--muted)}
+.accrow .line b{color:var(--ink);font-weight:700}
+.accrow .who{flex:0 0 86px;font-size:10px;font-weight:800;letter-spacing:.08em;color:var(--ink)}
+.accrow .closer{flex:0 0 auto;font-size:9px;font-weight:800;letter-spacing:.1em;color:var(--green);border:1px solid var(--green);padding:2px 5px}
 .vs-grid{display:grid;grid-template-columns:1fr 1fr;border-top:4px solid var(--ink)}
 .vs-cell{padding:16px;border-bottom:1px solid var(--faint);text-align:center}
 .vs-cell:first-child{border-right:1px solid var(--faint)}
