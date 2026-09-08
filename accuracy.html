@@ -81,7 +81,7 @@ async function load(){
   const mx=Math.max(...weeks.map(w=>Math.max(wkS[w].rec_yds,wkE[w].rec_yds)));
   document.getElementById("weeks").innerHTML='<div style="padding:8px 0">'+weeks.map(w=>
     `<div class="wkrow"><span>W${w}</span><span><i style="width:${wkE[w].rec_yds/mx*100}%"></i><i style="width:${wkS[w].rec_yds/mx*100}%;background:var(--ink)"></i></span><span class="va">${fmt(wkE[w].rec_yds)} / ${fmt(wkS[w].rec_yds)}</span></div>`
-  ).join("")+'</div><p class="sec-note">Each row: green is ESPN's average miss that week, black is Sleeper's (ESPN / Sleeper at right). Receiving yards.</p>';
+  ).join("")+'</div><p class="sec-note">Each row: green is the ESPN average miss that week, black is Sleeper (ESPN / Sleeper at right). Receiving yards.</p>';
   const lv=document.getElementById("live");
   if(live&&live.length){
     const hits=live.filter(g=>g.hit).length;
