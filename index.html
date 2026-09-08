@@ -67,7 +67,7 @@ function cdfAt(q,x){
 function hitProb(r){
   const p=projOf(r); if(p==null||!ERR)return null;
   const d=(ERR[modelKey(r)]||{})[r.stat];
-  if(!d||!d.q||!d.q.length)return null;
+  if(!d||!d.q||!d.q.length||(d.n||0)<150)return null;
   const gap=p-r.line, F=cdfAt(d.q,gap);
   const h=gap>0?F:1-F;
   return Math.max(.01,Math.min(.99,h));
@@ -112,6 +112,7 @@ function render(){
     const slT=r.sleeper_proj!=null?`Sleeper says <b>${fmt(r.sleeper_proj)}</b>`:"No Sleeper number";
     const esT=r.espn_proj!=null?`ESPN says <b>${fmt(r.espn_proj)}</b>`:"no ESPN number";
     const d=(ERR&&(ERR[modelKey(r)]||{})[r.stat]);
+    const curveOK=d&&(d.n||0)>=150;
     const box=document.createElement("div");box.className="prop";
     box.innerHTML=`
       <button class="prow" type="button" aria-expanded="false">
@@ -120,7 +121,7 @@ function render(){
         <span class="pgrid">
           <span><small>LINE</small><b>${fmt(r.line)}</b></span>
           <span><small>ESTIMATE</small><b>${fmt(p)}</b></span>
-          <span class="${you?"g-you":"g-vegas"}"><small>GAP</small><b>${you?"+":"−"}${fmt(Math.abs(gap))}</b></span>
+          <span class="${you?"g-you":"g-vegas"}"><small>GAP</small><b>${Math.abs(gap)<0.05?"0":(you?"+":"−")+fmt(Math.abs(gap))}</b></span>
           <span class="${you?"g-you":"g-vegas"}"><small>HIT%</small><b>${hp==null?"—":hp+"%"}</b></span>
         </span>
         <span class="edgebar" aria-hidden="true">
@@ -131,7 +132,7 @@ function render(){
       </button>
       <div class="pdet">
         <p>${slT} · ${esT}. Showing the ${MODEL==="avg"?"average of the two":MODEL} estimate.</p>
-        ${d?`<p>The hit chance comes from ${d.n.toLocaleString("en-US")} graded 2025 projections of ${esc(statL.toLowerCase())}: how often the model missed by less than this gap.</p>`:`<p>No 2025 curve for this stat yet, so no honest hit chance - the gap is still real arithmetic.</p>`}
+        ${curveOK?`<p>The hit chance comes from ${d.n.toLocaleString("en-US")} graded 2025 projections of ${esc(statL.toLowerCase())}: how often the model missed by less than this gap.</p>`:`<p>No 2025 curve deep enough for this stat, so no honest hit chance - the gap is still real arithmetic.</p>`}
         <p><b>${esc(r.game||"Game TBD")}</b>${k?" · "+esc(k):""}${r.over_odds?` · ${r.over_odds>0?"+":""}${r.over_odds}/${r.under_odds>0?"+":""}${r.under_odds}`:""}</p>
       </div>`;
     box.querySelector(".prow").addEventListener("click",()=>{const o=box.classList.toggle("open");box.querySelector(".prow").setAttribute("aria-expanded",String(o))});
