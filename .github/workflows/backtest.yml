@@ -1,0 +1,29 @@
+name: backtest
+on:
+  workflow_dispatch:
+  schedule:
+    # weekly, Monday 11:00 UTC (6 AM CT) - recomputes model accuracy and republishes
+    - cron: "0 11 * * 1"
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: backtest and publish
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: |
+          python scripts/backtest.py
+          python - <<'PY'
+          import json, os, sys
+          sys.path.insert(0, "scripts")
+          from collect import sb
+          key = os.environ["SUPABASE_SERVICE_KEY"]
+          bt = json.load(open("out/backtest.json"))
+          sb("POST", "backtest", key, {"id": "latest", "payload": bt}, prefer="resolution=merge-duplicates")
+          print("backtest published")
+          PY
