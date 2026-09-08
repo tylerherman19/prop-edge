@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Prop Edge - Accuracy</title>
+<meta name="description" content="How often the free projection models are right, and whether the edge actually edges." />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Archivo:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="ui.css" />
+</head>
+<body>
+<div class="bug"><span class="b1"><a href="index.html">PROP EDGE</a></span><span class="b2">ACCURACY</span><span class="b3" id="bug-upd"></span></div>
+<nav class="pagenav">
+<a href="index.html">THE BOARD</a>
+<a href="accuracy.html" class="on">ACCURACY</a>
+<a href="method.html">METHOD</a>
+</nav>
+<main>
+<p class="lede">Two claims get tested here. One: which free projection model lands closer to what players actually do. Two: when a model disagrees with the market line, does the model side win. The first has a full 2025 season of evidence. The second started counting the week this site went live - the record below fills in as games finish.</p>
+
+<div class="strip-head"><h2>HEAD TO HEAD, 2025 SEASON</h2><span>PROJECTIONS VS ACTUALS</span></div>
+<p class="sec-note">Average miss per player per week, every 2025 regular-season week, players projected for a real role. Lower is better. Black is Sleeper, green is ESPN.</p>
+<div id="cmp"></div>
+<div id="verdict" class="vs-grid"></div>
+
+<div class="strip-head"><h2>WEEK BY WEEK, 2025</h2><span>RECEIVING YARDS, AVG MISS</span></div>
+<div id="weeks"></div>
+<p class="sec-note">One stat shown as the pattern check. The full table above carries every stat we track.</p>
+
+<div class="strip-head"><h2>THE LIVE RECORD</h2><span>EDGE VS MARKET, GRADED AFTER GAMES</span></div>
+<p class="sec-note" id="live-note">Every snapshot line gets kept. After each week's games, the grader checks the biggest edges against what players actually did and posts the scorecard here.</p>
+<div id="live"></div>
+
+<div class="strip-head"><h2>WHAT THIS CAN'T SAY YET</h2><span>READ THIS PART</span></div>
+<p class="note" id="limits">Historical market lines are not in any free feed, so the 2025 test grades projections against real outcomes - not against 2025's lines. The honest statement that data supports: "this model is usually within X of the truth." The statement it cannot yet support: "this edge would have beaten 2025's market." That second claim starts accumulating from the week the collector went live, one graded week at a time.</p>
+<section class="colophon"><p>Generated from free public data. Misses are measured in the stat's own units - yards, catches, touchdowns.</p></section>
+</main>
+<script>
+const SB_URL="__SUPABASE_URL__", SB_KEY="__SUPABASE_ANON_KEY__";
+const STAT_LABEL={pass_yds:"Passing yards",pass_tds:"Passing TDs",pass_att:"Pass attempts",pass_comp:"Completions",pass_int:"Interceptions",rush_yds:"Rushing yards",rush_tds:"Rushing TDs",rush_att:"Rush attempts",rec_yds:"Receiving yards",rec:"Receptions",rec_tds:"Receiving TDs",rec_tgt:"Targets"};
+const ORDER=["pass_yds","pass_tds","pass_att","pass_comp","pass_int","rush_yds","rush_att","rush_tds","rec_yds","rec","rec_tgt","rec_tds"];
+const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const fmt=(n,d=1)=>n==null?"—":Number(n).toLocaleString("en-US",{maximumFractionDigits:d});
+async function load(){
+  let bt=null, live=[];
+  try{
+    const h={apikey:SB_KEY,Authorization:"Bearer "+SB_KEY};
+    bt=await fetch(`${SB_URL}/rest/v1/backtest?select=payload&id=eq.latest`,{headers:h}).then(r=>r.json()).then(x=>x&&x[0]&&x[0].payload);
+    live=await fetch(`${SB_URL}/rest/v1/live_grades?select=*&order=week.desc&limit=200`,{headers:h}).then(r=>r.ok?r.json():[]);
+  }catch(e){}
+  if(!bt){document.getElementById("cmp").innerHTML='<p class="sec-note">Backtest file not published yet.</p>';return}
+  const s25=bt.seasons["2025_sleeper"]?.by_stat||{}, e25=bt.seasons["2025_espn"]?.by_stat||{};
+  const stats=ORDER.filter(s=>s25[s]&&e25[s]);
+  const maxMae=Math.max(...stats.map(s=>Math.max(s25[s].mae,e25[s].mae)));
+  let slWins=0, esWins=0;
+  document.getElementById("cmp").innerHTML='<div class="cmp head"><span>STAT</span><span>SLEEPER (black)</span><span>ESPN (green)</span><span style="text-align:right">CLOSER</span></div>'+stats.map(s=>{
+    const a=s25[s], b=e25[s], win=a.mae<=b.mae?"SLEEPER":"ESPN";
+    win==="SLEEPER"?slWins++:esWins++;
+    return `<div class="cmp"><span class="st">${esc(STAT_LABEL[s])}</span>
+      <span class="bars"><i class="a" style="width:${a.mae/maxMae*100}%"></i></span>
+      <span class="bars"><i class="b" style="width:${b.mae/maxMae*100}%"></i></span>
+      <span class="win">${win}</span></div>
+      <div class="cmp" style="padding-top:0;border-bottom:1px solid var(--faint)"><span></span><span style="font-size:11px;color:var(--muted)">misses by ${fmt(a.mae)} on ${fmt(a.n,0)} checks</span><span style="font-size:11px;color:var(--muted)">misses by ${fmt(b.mae)} on ${fmt(b.n,0)} checks</span><span></span></div>`;
+  }).join("");
+  document.getElementById("verdict").innerHTML=
+    `<div class="vs-cell"><span class="n">${slWins}</span><span class="l">stats where Sleeper lands closer</span></div>
+     <div class="vs-cell"><span class="n green">${esWins}</span><span class="l">stats where ESPN lands closer</span></div>`;
+  const wkS=bt.seasons["2025_sleeper"]?.by_week_mae||{};
+  const wkE=bt.seasons["2025_espn"]?.by_week_mae||{};
+  const weeks=Object.keys(wkS).filter(w=>wkS[w].rec_yds&&wkE[w]?.rec_yds);
+  const mx=Math.max(...weeks.map(w=>Math.max(wkS[w].rec_yds,wkE[w].rec_yds)));
+  document.getElementById("weeks").innerHTML='<div style="padding:8px 0">'+weeks.map(w=>
+    `<div class="wkrow"><span>W${w}</span><span><i style="width:${wkE[w].rec_yds/mx*100}%"></i><i style="width:${wkS[w].rec_yds/mx*100}%;background:var(--ink)"></i></span><span class="va">${fmt(wkE[w].rec_yds)} / ${fmt(wkS[w].rec_yds)}</span></div>`
+  ).join("")+'</div><p class="sec-note">Each row: green is ESPN's average miss that week, black is Sleeper's (ESPN / Sleeper at right). Receiving yards.</p>';
+  const lv=document.getElementById("live");
+  if(live&&live.length){
+    const hits=live.filter(g=>g.hit).length;
+    lv.innerHTML=`<div class="vs-grid"><div class="vs-cell"><span class="n green">${hits}</span><span class="l">edges that hit</span></div><div class="vs-cell"><span class="n">${live.length-hits}</span><span class="l">edges that missed</span></div></div>`
+      +live.slice(0,60).map(g=>`<div class="rec"><span class="d">W${g.week}</span><span class="pk"><b>${esc(g.player)}</b> ${esc(g.stat)} · ${g.side} ${fmt(g.line)} <span style="color:var(--muted)">(${esc(g.proj_source)} ${fmt(g.proj_value)}, actual ${fmt(g.actual)})</span></span><span class="res ${g.hit?"hit":"miss"}">${g.hit?"HIT":"MISS"}</span></div>`).join("");
+  }else{
+    lv.innerHTML='<p class="sec-note">No graded weeks yet. The collector started Week 2, 2026 - the first scorecard posts after those games finish.</p>';
+  }
+  const u=bt.generated?new Date(bt.generated):null;
+  document.getElementById("bug-upd").textContent=u?("BT "+u.toLocaleDateString("en-US",{month:"short",day:"numeric"}).toUpperCase()):"";
+}
+load();
+</script>
+</body>
+</html>
