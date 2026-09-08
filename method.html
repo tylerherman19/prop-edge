@@ -28,9 +28,14 @@
 <p class="note"><b>Sleeper.</b> The fantasy app's open API serves weekly stat-level projections - yards, catches, touchdowns, attempts - for every rostered player. Refreshed through the week.</p>
 <p class="note"><b>ESPN.</b> ESPN's fantasy API is anonymously readable and carries per-week projections in the same shape. The two models disagree with each other plenty; the Accuracy page tracks which one lands closer.</p>
 
-<div class="strip-head"><h2>THE EDGE NUMBER</h2><span>WHAT IT MEANS AND WHAT IT DOESN'T</span></div>
-<p class="note">Edge = model projection minus market line, in the stat's own units. "Maye +12.5 passing yards" means the model average sits 12.5 yards over the posted number. Green means the models lean over, red means under. It is a measurement of disagreement, not a prediction of the future and not betting advice. Models are wrong constantly - the Accuracy page shows exactly how wrong, in plain numbers.</p>
+<div class="strip-head"><h2>THE FOUR NUMBERS</h2><span>LINE, ESTIMATE, GAP, HIT CHANCE</span></div>
+<p class="note">Every prop on the board carries four numbers. The <b>line</b> is the market's number. The <b>estimate</b> is what the model expects the player to do. The <b>gap</b> is the distance between them, in the stat's own units. The <b>hit chance</b> is how often a gap that size actually held up across the 2025 season.</p>
+<p class="note"><b>Your advantage</b> means the estimate sits above the line - room the market is not pricing. <b>Vegas advantage</b> means the estimate sits under the line - the book's number looks safe. Neither is a command. It is a measurement of disagreement, not a prediction of the future and not betting advice. Models are wrong constantly - the Accuracy page shows exactly how wrong, in plain numbers.</p>
 <p class="note">Props that join cleanly to at least one model make the board. Props that don't - defenses, kickers, some deep backups - are counted in the data note and left out rather than guessed at.</p>
+
+<div class="strip-head"><h2>THE HIT CHANCE</h2><span>HOW IT'S COMPUTED, IN PLAIN ENGLISH</span></div>
+<p class="note">Take every 2025 projection the model made for one stat - say receiving yards - and measure how far each one landed from what the player actually did. That gives a miss curve: the full shape of how the model gets that stat wrong. When a new prop shows the estimate 12 yards above the line, the hit chance is the share of 2025 where the model's miss was smaller than 12 yards. If the model missed by less than that 61% of the time, the card says 61%.</p>
+<p class="note">Each stat gets its own curve for each model, and one for the average of the two models. Combo stats like rush + receiving yards get their own curves built from paired weeks. Stats with no 2025 curve - longest reception, for example - show no hit chance rather than a made-up one. The curves refresh every week as the new season's games get graded.</p>
 
 <div class="strip-head"><h2>THE PLUMBING</h2><span>WHERE IT LIVES</span></div>
 <p class="note">A scheduled job on GitHub pulls the feeds, computes the board, and writes it into a Supabase database. This site reads the latest snapshot straight from the database when you open it. Lines move during the week; the snapshot time is in the black bar up top, and every snapshot is kept so edges can be graded after the games.</p>
