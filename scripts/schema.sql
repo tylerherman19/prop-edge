@@ -46,18 +46,29 @@ create table if not exists live_grades (
   graded_at timestamptz not null default now(),
   unique (week, season, source, player, stat, proj_source)
 );
--- public read-only; writes happen with the service key from the collector
+-- public read-only; writes happen with the service key from the collector.
+-- The whole file is meant to be re-runnable: everything above uses
+-- "if not exists" or "create or replace", but CREATE POLICY has no such form
+-- in Postgres, so drop first. Without this a re-run aborts on the first policy
+-- and, because the SQL editor runs the script in one transaction, nothing
+-- after it applies either - including the migration at the bottom.
 alter table runs enable row level security;
 alter table edges enable row level security;
 alter table backtest enable row level security;
 alter table live_grades enable row level security;
+drop policy if exists "public read runs" on runs;
 create policy "public read runs" on runs for select to anon using (true);
+drop policy if exists "public read edges" on edges;
 create policy "public read edges" on edges for select to anon using (true);
+drop policy if exists "public read backtest" on backtest;
 create policy "public read backtest" on backtest for select to anon using (true);
+drop policy if exists "public read grades" on live_grades;
 create policy "public read grades" on live_grades for select to anon using (true);
 
 -- ---------------------------------------------------------------------------
--- Migration (safe to re-run): the live record grades the player-model side too,
+-- Migration (safe to re-run on its own, and safe to run these three lines
+-- alone if the rest of the file is already applied): the live record grades
+-- the player-model side too,
 -- so the Accuracy page can validate the number the board actually prints and
 -- not only the projection-gap side. collect.py falls back to inserting without
 -- these columns until this block has been run.
