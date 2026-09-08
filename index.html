@@ -23,7 +23,8 @@
   <button class="fbtn on" data-side="all">ALL</button>
   <button class="fbtn over" data-side="over">YOUR ADVANTAGE</button>
   <button class="fbtn under" data-side="under">VEGAS ADVANTAGE</button>
-  <button class="fbtn srt on" data-sort="hit">SORT: HIT%</button>
+  <button class="fbtn srt on" data-sort="edge">SORT: EDGE</button>
+  <button class="fbtn srt" data-sort="hit">SORT: HIT%</button>
   <button class="fbtn srt" data-sort="gap">SORT: GAP</button>
   <select id="sel-stat" aria-label="Stat filter"><option value="">ALL STATS</option></select>
   <select id="sel-team" aria-label="Team filter"><option value="">ALL TEAMS</option></select>
@@ -38,7 +39,8 @@
 <div id="board"></div>
 <p class="note" id="datanote"></p>
 <section class="colophon">
-<p>Your advantage means the player's own game log clears the market's line more often than not. Vegas advantage means his log stays under it. The hit chance is graded on his own tracked games - recency-weighted, shrunk toward his position's league average when he's played few, then calibrated on 2025 results.</p>
+<p>Every prop is priced both ways, like a prediction market. The two percentages come from the player's own game log - recency-weighted, shrunk toward his position's league average when he's played few, then calibrated on 2025 results. <b>Model pick</b> marks the side his log favors. The estimate underneath is this week's Sleeper/ESPN projection, a separate signal - when the two disagree, you see both and make the call.</p>
+<p><b>Edge</b> is the default sort: hit-chance confidence times the model-vs-line disagreement, measured in the player's own spread. A big gap the player's log agrees with outranks a coin flip with a huge gap. Hit% and Gap sorts are still there when you want one signal at a time.</p>
 <p>A big gap is a disagreement, not a guarantee. Nothing here is betting advice - it is arithmetic on free public data.</p>
 </section>
 </main>
@@ -50,7 +52,7 @@ const STAT_LABEL = {pass_yds:"Passing yards",pass_tds:"Passing TDs",pass_att:"Pa
 const UNIT = {pass_yds:"yards",pass_tds:"touchdowns",pass_att:"attempts",pass_comp:"completions",pass_int:"interceptions",rush_yds:"yards",rush_tds:"touchdowns",rush_att:"carries",rec_yds:"yards",rec:"receptions",rec_tds:"touchdowns",rec_tgt:"targets",rush_rec_yds:"yards",pass_rush_yds:"yards",long_rec:"yards",long_rush:"yards",long_comp:"yards",any_td:"touchdowns"};
 const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const fmt=(n,d=1)=>n==null?"—":Number(n).toLocaleString("en-US",{maximumFractionDigits:d});
-let ROWS=[], META={}, SIDE="all", MODEL="avg", PC=null, PG=null, SORT="hit", SDIR=-1;
+let ROWS=[], META={}, SIDE="all", MODEL="avg", PC=null, PG=null, SORT="edge";
 
 function normName(s){
   return String(s||"").normalize("NFKD").replace(/[\u0300-\u036f]/g,"")
@@ -97,28 +99,33 @@ function passes(r){
   return true;
 }
 function barScale(rows){let m=10;for(const r of rows){const a=Math.abs(edgeOf(r)||0);if(a>m)m=a}return m;}
+function edgeScore(r,h){
+  if(!h)return -1;
+  const gap=edgeOf(r); if(gap==null||!h.s)return -1;
+  return (Math.max(h.p,1-h.p)-0.5)*(Math.abs(gap)/h.s);
+}
 function render(){
   const rows=ROWS.filter(passes).map(r=>({r,h:playerHit(r)}))
     .filter(({h})=>SIDE==="all"||(h&&(SIDE==="over"?h.p>=0.5:h.p<0.5)))
     .sort((a,b)=>{
-      if(SORT==="gap"){
-        const ga=Math.abs(edgeOf(a.r)||0), gb=Math.abs(edgeOf(b.r)||0);
-        return SDIR*(ga-gb);
+      if(SORT==="gap")return Math.abs(edgeOf(b.r)||0)-Math.abs(edgeOf(a.r)||0);
+      if(SORT==="hit"){
+        const ka=a.h==null?-1:Math.abs(a.h.p-.5), kb=b.h==null?-1:Math.abs(b.h.p-.5);
+        return kb-ka;
       }
-      const ka=a.h==null?-1:Math.abs(a.h.p-.5), kb=b.h==null?-1:Math.abs(b.h.p-.5);
-      return SDIR>0?ka-kb:kb-ka;
+      return edgeScore(b.r,b.h)-edgeScore(a.r,a.h);
     });
   document.getElementById("count").textContent=rows.length+" PROPS";
   const wrap=document.getElementById("board");wrap.innerHTML="";
   if(!rows.length){wrap.innerHTML='<p class="sec-note">Nothing on the board with these filters. Loosen one.</p>';return}
-  const scale=barScale(rows.map(x=>x.r));
   for(const {r,h} of rows.slice(0,400)){
     const p=projOf(r), gap=p==null?null:p-r.line, you=h?h.p>=0.5:(gap!=null&&gap>0);
-    const half=gap==null?0:Math.min(50,Math.abs(gap)/scale*50);
     const unit=UNIT[r.stat]||"";
     const statL=STAT_LABEL[r.stat]||r.stat;
     const k=r.kickoff?new Date(r.kickoff).toLocaleString("en-US",{timeZone:TZ,weekday:"short",hour:"numeric",minute:"2-digit"}):"";
-    const hp=h==null?null:Math.round(Math.max(h.p,1-h.p)*100);
+    const hp=h==null?null:Math.round(h.p*100);
+    const up=h==null?null:Math.round((1-h.p)*100);
+    const pickOver=h?h.p>=0.5:(gap!=null&&gap>0);
     const say = h==null
       ? `${esc(r.player)}: the model says <b>${fmt(p)}</b>, the line is <b>${fmt(r.line)}</b>${gap==null?"":` - that is <b>${fmt(Math.abs(gap))} ${unit}</b> ${gap>0?"above":"under"} the number`}. No player curve yet, so no honest hit chance.`
       : you
@@ -129,21 +136,31 @@ function render(){
     const box=document.createElement("div");box.className="prop";
     box.innerHTML=`
       <button class="prow" type="button" aria-expanded="false">
-        <span class="phead"><span class="nm">${esc(r.player)}</span><span class="tm">${esc(r.team||"")}</span><span class="src">${r.source==="fanduel"?"FANDUEL":"PRIZEPICKS"}</span></span>
-        <span class="pstat">${esc(statL)}${k?" · "+esc(k):""} <span class="adv ${you?"you":"vegas"}">${you?"YOUR ADVANTAGE":"VEGAS ADVANTAGE"}</span></span>
-        <span class="pgrid">
+        <span class="mk-top">
+          <span class="mk-id">
+            <span class="mk-player">${esc(r.player)}<em>${esc(r.team||"")}</em></span>
+            <span class="mk-sub">${esc(statL)}${k?" · "+esc(k):""} · ${r.source==="fanduel"?"FANDUEL":"PRIZEPICKS"}</span>
+          </span>
+        </span>
+        <span class="mk-mkt">
+          <span class="mk-opt">
+            <span class="mk-opt-top"><span class="mk-ask">OVER ${fmt(r.line)}${pickOver&&h?'<i class="mk-pick">MODEL PICK</i>':""}</span><span class="mk-price over">${hp==null?"—":hp+"%"}</span></span>
+            <span class="mk-bar" aria-hidden="true"><span class="mk-tick"></span><span class="mk-fill over" style="width:${hp==null?0:hp}%"></span></span>
+          </span>
+          <span class="mk-opt">
+            <span class="mk-opt-top"><span class="mk-ask">UNDER ${fmt(r.line)}${!pickOver&&h?'<i class="mk-pick">MODEL PICK</i>':""}</span><span class="mk-price under">${up==null?"—":up+"%"}</span></span>
+            <span class="mk-bar" aria-hidden="true"><span class="mk-tick"></span><span class="mk-fill under" style="width:${up==null?0:up}%"></span></span>
+          </span>
+        </span>
+        <span class="mk-data">
           <span><small>LINE</small><b>${fmt(r.line)}</b></span>
           <span><small>ESTIMATE</small><b>${fmt(p)}</b></span>
-          <span class="${you?"g-you":"g-vegas"}"><small>GAP</small><b>${gap==null||Math.abs(gap)<0.05?"0":(gap>0?"+":"−")+fmt(Math.abs(gap))}</b></span>
-          <span class="${you?"g-you":"g-vegas"}"><small>HIT%</small><b>${hp==null?"—":hp+"%"}</b><i>${h?h.n+" GAMES":"NO PLAYER CURVE"}</i></span>
+          <span><small>GAP</small><b>${gap==null||Math.abs(gap)<0.05?"0":(gap>0?"+":"−")+fmt(Math.abs(gap))}</b></span>
+          <span><small>BASIS</small><b>${h?h.n+" GMS":"NO CURVE"}</b></span>
         </span>
-        <span class="edgebar" aria-hidden="true">
-          <span class="ln"></span>
-          <span class="fill ${you?"over":"under"}" style="${you?`left:50%;width:${half}%`:`right:50%;width:${half}%`}"></span>
-        </span>
-        <span class="psay">${say}</span>
       </button>
       <div class="pdet">
+        <p class="psay">${say}</p>
         <p>${slT} · ${esT}. Showing the ${MODEL==="avg"?"average of the two":MODEL} estimate.</p>
         ${h?`<p>Hit chance basis: <b>${h.n}</b> of his tracked ${esc(statL.toLowerCase())} games (avg ${fmt(h.m)}, spread ${fmt(h.s)}), recency-weighted and shrunk toward his position's league average, then calibrated on 2025 results. The Method page explains the math.</p>`:`<p>No player curve for ${esc(r.player)} on this stat yet (under 3 tracked games), so no honest hit chance - the gap is still real arithmetic.</p>`}
         ${r.game?`<p><b>${esc(r.game)}</b>${k?" · "+esc(k):""}${r.over_odds?` · ${r.over_odds>0?"+":""}${r.over_odds}/${r.under_odds>0?"+":""}${r.under_odds}`:""}</p>`:(k?`<p><b>${esc(k)}</b>${r.over_odds?` · ${r.over_odds>0?"+":""}${r.over_odds}/${r.under_odds>0?"+":""}${r.under_odds}`:""}</p>`:"")}
@@ -177,15 +194,15 @@ async function load(){
   const teams=[...new Set(ROWS.map(r=>r.team).filter(Boolean))].sort();
   document.getElementById("sel-team").innerHTML='<option value="">ALL TEAMS</option>'+teams.map(t=>`<option>${esc(t)}</option>`).join("");
   const joined=ROWS.filter(r=>r.sleeper_proj!=null||r.espn_proj!=null).length;
-  document.getElementById("lede").innerHTML=`Every NFL player prop on two free markets, measured against two free projection models. <b>${joined} props</b> have a model number, a gap, and a hit chance. Strongest first.`;
+  document.getElementById("lede").innerHTML=`Every NFL player prop on two free markets, priced like a prediction market: <b>${joined} props</b> with a model number, a gap, and a hit chance. Ranked by edge - the biggest disagreements with the highest hit rates first.`;
   const c=META.counts||{};
   document.getElementById("datanote").textContent=`Last pull: ${c.fanduel??"—"} FanDuel lines, ${c.prizepicks??"—"} PrizePicks lines, ${c.sleeper_proj??"—"} Sleeper projections, ${c.espn_proj??"—"} ESPN projections. Props with no model number are hidden by default.`;
   render();
 }
 document.querySelectorAll(".fbtn").forEach(b=>b.addEventListener("click",()=>{SIDE=b.dataset.side;document.querySelectorAll(".fbtn").forEach(x=>x.classList.toggle("on",x===b));render()}));
 document.querySelectorAll(".fbtn.srt").forEach(b=>b.addEventListener("click",()=>{
-  if(b.classList.contains("on")){SDIR=-SDIR}
-  else{SORT=b.dataset.sort;SDIR=-1;document.querySelectorAll(".fbtn.srt").forEach(x=>x.classList.toggle("on",x===b))}
+  SORT=b.dataset.sort;
+  document.querySelectorAll(".fbtn.srt").forEach(x=>x.classList.toggle("on",x===b));
   render();
 }));
 ["sel-stat","sel-team","sel-src"].forEach(id=>document.getElementById(id).addEventListener("change",render));
