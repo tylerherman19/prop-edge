@@ -239,7 +239,7 @@ def build_logs(rows):
         k = norm_name(a["player"])
         if not any(a.get(t) is not None for t in STATS): continue
         bp = by_player.setdefault(k, {"pos": None, "weeks": {}})
-        if a.get("pos"): bp["pos"] = a["pos"]
+        if not bp["pos"] and a.get("pos"): bp["pos"] = a["pos"]
         seq = a.get("seq", a["season"] * 100 + a["week"])
         wk = bp["weeks"].setdefault(seq, {})
         for t in STATS:
@@ -257,7 +257,8 @@ def build_logs(rows):
                 if c1 in ever or c2 in ever:
                     stats.setdefault(cs, {})[seq] = wk.get(c1, 0.0) + wk.get(c2, 0.0)
         logs[k] = {"pos": bp["pos"] or "UNK",
-                   "stats": {t: sorted(d.items()) for t, d in stats.items()}}
+                   "stats": {t: sorted(d.items()) for t, d in stats.items()},
+                   "weeks": sorted(bp["weeks"].items())}  # raw, for honest walk-forward
     return logs
 
 def wstats(vals):
@@ -377,29 +378,36 @@ def player_model(logs, sp):
     pairs_lg = {}
     for k, lg in logs.items():
         pos = lg["pos"]
-        for t, series in lg["stats"].items():
-            for i, (seq, val) in enumerate(series):
-                if seq < 202500 or seq >= 202600: continue  # calibration on 2025 only
-                if i < MIN_GAMES: continue
+        weeks = lg["weeks"]  # sorted [(seq, raw)] ; ever_pre uses strictly earlier weeks
+        ever_pre = set()     # so no future game decides what counts as a 0
+        for wi, (seq, raw) in enumerate(weeks):
+            if 202500 <= seq < 202600 and wi >= MIN_GAMES and ever_pre:
                 pr = sp_idx.get((k, seq))
-                if not pr: continue
-                if t in COMBO:
-                    c1, c2 = COMBO[t]
-                    v1, v2 = pr.get(c1), pr.get(c2)
-                    if v1 is None or v2 is None: continue
-                    line = v1 + v2
-                else:
-                    line = pr.get(t)
-                    if line is None: continue
-                if line < 0.5: continue
-                if val == line: continue  # push, drop from calibration
-                out = 1 if val > line else 0
-                prior = [v for _, v in series[:i]]
-                base = bl.query(pos, t, before_seq=seq)
-                m, s, _ = blend(prior, base, t)
-                pairs.setdefault(t, []).append((seq, p_over(m, s, line), out))
-                if base is not None:
-                    pairs_lg.setdefault(t, []).append((seq, p_over(base[1], max(base[2], SIGMA_FLOOR.get(t, 1)), line), out))
+                if pr:
+                    for t in ALL_STATS:
+                        if t in COMBO:
+                            c1, c2 = COMBO[t]
+                            if c1 not in ever_pre and c2 not in ever_pre: continue
+                            v1, v2 = pr.get(c1), pr.get(c2)
+                            if v1 is None or v2 is None: continue
+                            line = v1 + v2
+                            val = raw.get(c1, 0.0) + raw.get(c2, 0.0)
+                            prior = [w.get(c1, 0.0) + w.get(c2, 0.0) for _, w in weeks[:wi]]
+                        else:
+                            if t not in ever_pre: continue
+                            line = pr.get(t)
+                            if line is None: continue
+                            val = raw.get(t, 0.0)
+                            prior = [w.get(t, 0.0) for _, w in weeks[:wi]]
+                        if line < 0.5: continue
+                        if val == line: continue  # push, drop from calibration
+                        out = 1 if val > line else 0
+                        base = bl.query(pos, t, before_seq=seq)
+                        m, s, _ = blend(prior, base, t)
+                        pairs.setdefault(t, []).append((seq, p_over(m, s, line), out))
+                        if base is not None:
+                            pairs_lg.setdefault(t, []).append((seq, p_over(base[1], max(base[2], SIGMA_FLOOR.get(t, 1)), line), out))
+            ever_pre |= set(raw)
     grade = {}
     all_pairs, all_lg = [], []
     for t in ALL_STATS:
