@@ -27,6 +27,11 @@
 
 <p class="note" id="weeks-note"></p>
 
+<div class="strip-head"><h2>THE HIT% MODEL, TESTED</h2><span>2025 WALK-FORWARD, HELD-OUT WEEKS 13-18</span></div>
+<p class="sec-note">The board's over/under percentages come from a different model: a player's own game log versus the line. It is scored here the only way that means anything - fit on the early weeks, tested on weeks it never saw, and compared against the one baseline that is hard to beat: <b>always predict how often the over hit in the training weeks</b>. Brier score, lower is better. A stat only reaches the board if this test says it earned a number.</p>
+<div id="pm"></div>
+<p class="note" id="pm-note"></p>
+
 <div class="strip-head"><h2>THE LIVE RECORD</h2><span>EDGE VS MARKET, GRADED AFTER GAMES</span></div>
 <p class="sec-note" id="live-note">Every snapshot line gets kept. After each week's games, the grader checks the biggest edges against what players actually did and posts the scorecard here.</p>
 <div id="live"></div>
@@ -39,14 +44,14 @@
 const SB_URL="https://aahqagqztanltejsqjom.supabase.co", SB_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFhaHFhZ3F6dGFubHRlanNxam9tIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg4OTU3MjIsImV4cCI6MjEwNDQ3MTcyMn0.GWQZZ0Sp45Q6mW8Fz3DYF2Gj-LEURBMa7HoWvBgXmaE";
 const STAT_LABEL={pass_yds:"Passing yards",pass_tds:"Passing TDs",pass_att:"Pass attempts",pass_comp:"Completions",pass_int:"Interceptions",rush_yds:"Rushing yards",rush_tds:"Rushing TDs",rush_att:"Rush attempts",rec_yds:"Receiving yards",rec:"Receptions",rec_tds:"Receiving TDs",rec_tgt:"Targets"};
 const ORDER=["pass_yds","pass_tds","pass_att","pass_comp","pass_int","rush_yds","rush_att","rush_tds","rec_yds","rec","rec_tgt","rec_tds"];
-const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const fmt=(n,d=1)=>n==null?"—":Number(n).toLocaleString("en-US",{maximumFractionDigits:d});
 async function load(){
   let bt=null, live=[];
   try{
     const h={apikey:SB_KEY,Authorization:"Bearer "+SB_KEY};
     bt=await fetch(`${SB_URL}/rest/v1/backtest?select=payload&id=eq.latest`,{headers:h}).then(r=>r.json()).then(x=>x&&x[0]&&x[0].payload);
-    live=await fetch(`${SB_URL}/rest/v1/live_grades?select=*&order=week.desc&limit=200`,{headers:h}).then(r=>r.ok?r.json():[]);
+    live=await fetch(`${SB_URL}/rest/v1/live_grades?select=*&season=eq.2026&order=week.desc&limit=1000`,{headers:h}).then(r=>r.ok?r.json():[]);
   }catch(e){}
   if(!bt){document.getElementById("cmp").innerHTML='<p class="sec-note">Backtest file not published yet.</p>';return}
   const ERRS=bt.errors||{};
@@ -56,31 +61,62 @@ async function load(){
   const q=(a,p)=>a[Math.min(a.length-1,Math.round(p/100*(a.length-1)))];
   const nice=(v,u)=>u==="yards"&&v>=19.5?Math.round(v):Math.round(v*10)/10;
   const rowsFor=(key,name)=>stats.map(s=>({s,name,d:(ERRS[key]||{})[s]})).filter(x=>x.d);
+  // errors.{sleeper,espn,avg} are three DIFFERENT samples: avg only exists where
+  // both models projected the player. Picking a winner by comparing medians
+  // across them is not a head-to-head. errors_matched is the matched sample.
+  const MATCH=(bt.errors_matched||{}).stats||{};
   const wins={Sleeper:0,ESPN:0,"Average":0};
   const html=stats.map(s=>{
     const cells=[["sleeper","SLEEPER"],["espn","ESPN"],["avg","THE AVERAGE"]].map(([k,nm])=>{
       const d=(ERRS[k]||{})[s]; if(!d)return null;
       return {nm, med:q(d.ae_q,50), p90:q(d.ae_q,90), n:d.n};
     }).filter(Boolean);
-    const best=cells.reduce((a,b)=>a.med<=b.med?a:b);
-    wins[best.nm==="SLEEPER"?"Sleeper":best.nm==="ESPN"?"ESPN":"Average"]++;
+    const mm=MATCH[s];
+    let best=null;
+    if(mm){
+      const cand=[["SLEEPER",mm.sleeper_mae],["ESPN",mm.espn_mae],["THE AVERAGE",mm.avg_mae]]
+        .filter(([,v])=>v!=null).sort((a,b)=>a[1]-b[1])[0];
+      if(cand){best=cells.find(c=>c.nm===cand[0])||null;
+        wins[cand[0]==="SLEEPER"?"Sleeper":cand[0]==="ESPN"?"ESPN":"Average"]++;}
+    }
     return `<div class="accrow"><div class="st">${esc(LABEL2[s]||s)}</div>`+cells.map(c=>
-      `<div class="line"><span class="who">${c.nm}</span><span>out of <b>${c.n.toLocaleString("en-US")}</b> checks, landed within <b>${nice(c.med,UNIT[s])} ${UNIT[s]}</b> of the truth half the time, within <b>${nice(c.p90,UNIT[s])} ${UNIT[s]}</b> nine times out of ten</span>${c===best?'<span class="closer">CLOSEST</span>':''}</div>`
+      `<div class="line"><span class="who">${c.nm}</span><span>out of <b>${c.n.toLocaleString("en-US")}</b> checks, landed within <b>${nice(c.med,UNIT[s])} ${UNIT[s]}</b> of the truth half the time, within <b>${nice(c.p90,UNIT[s])} ${UNIT[s]}</b> nine times out of ten</span>${best&&c===best?'<span class="closer">CLOSEST</span>':''}</div>`
     ).join("")+`</div>`;
   }).join("");
   document.getElementById("cmp").innerHTML=html;
   document.getElementById("verdict").innerHTML=
-    `We tracked <b>${stats.length} stats</b> across the full 2025 season. Sleeper was the more accurate model on <b>${wins.Sleeper}</b> of them, ESPN on <b>${wins.ESPN}</b>, and the average of the two - what the board shows by default - on <b>${wins.Average}</b>. Stat by stat:`;
+    `We tracked <b>${stats.length} stats</b> across the full 2025 season. On the matched sample - only the player-weeks where both models published a number, so it is a real head-to-head - Sleeper was closer on <b>${wins.Sleeper}</b> stats, ESPN on <b>${wins.ESPN}</b>, and the average of the two on <b>${wins.Average}</b>. The spread figures under each name are that model's own full sample, so they are descriptive, not the comparison. Stat by stat:`;
   const wkS=bt.seasons["2025_sleeper"]?.by_week_mae||{};
   const wvals=Object.values(wkS).map(x=>x.rec_yds).filter(v=>v!=null);
   if(wvals.length){
     document.getElementById("weeks-note").innerHTML=
       `Week to week, nothing moved: the receiving-yards miss stayed between <b>${fmt(Math.min(...wvals))} and ${fmt(Math.max(...wvals))} yards</b> across all ${wvals.length} weeks of 2025. The model is steady, not streaky.`;
   }
+  // --- player model: honest holdout table -------------------------------
+  const PG=bt.player_model_grade||{}, PUB=new Set(bt.player_model_published||[]);
+  const pmRows=Object.entries(PG).filter(([k,v])=>k!=="_all"&&v.holdout_n)
+    .sort((a,b)=>(b[1].holdout_n||0)-(a[1].holdout_n||0));
+  const pct=v=>v==null?"—":(v>0?"+":"")+v.toFixed(2)+"%";
+  document.getElementById("pm").innerHTML=pmRows.map(([k,v])=>{
+    const on=PUB.has(k), sk=v.holdout_skill_vs_base_rate;
+    return `<div class="accrow"><div class="st">${esc(LABEL2[k]||k)}</div>`
+      +`<div class="line"><span class="who">${on?"ON THE BOARD":"NOT SHOWN"}</span>`
+      +`<span>out of <b>${(v.holdout_n||0).toLocaleString("en-US")}</b> held-out props it scored <b>${(v.holdout_brier??0).toFixed(4)}</b> against the base-rate baseline's <b>${(v.holdout_brier_base_rate??0).toFixed(4)}</b> — <b>${pct(sk)}</b>, and it ranked winners over losers <b>${((v.holdout_auc??0.5)*100).toFixed(1)}%</b> of the time (50% is a coin flip)</span>`
+      +`${on?'<span class="closer">PUBLISHED</span>':''}</div></div>`;
+  }).join("")||'<p class="sec-note">No graded stats in this payload.</p>';
+  const A=PG._all||{};
+  document.getElementById("pm-note").innerHTML=
+    `Across all <b>${(A.holdout_n||0).toLocaleString("en-US")}</b> held-out props the model scored <b>${(A.holdout_brier??0).toFixed(4)}</b>. `
+    +`Always guessing the training weeks' over rate (<b>${A.train_over_rate!=null?Math.round(A.train_over_rate*100)+"%":"—"}</b>) scores <b>${(A.holdout_brier_base_rate??0).toFixed(4)}</b>, so the model's real gain is <b>${pct(A.holdout_skill_vs_base_rate)}</b> — small and honest. `
+    +`Uncalibrated it scores <b>${(A.holdout_brier_raw??0).toFixed(4)}</b>, worse than the baseline: the calibration step is doing most of the work. `
+    +`<b>And the calibration was fitted against Sleeper's projections standing in for the line</b>, because no free archive of 2025 sportsbook lines exists. Sleeper's numbers run high on rushing, so the fitted curve shades those props toward the under whether or not a real bookmaker's line would. Until the live record below is deep enough to refit against actual market lines, read every percentage as calibrated to that proxy.`;
   const lv=document.getElementById("live");
   if(live&&live.length){
     const hits=live.filter(g=>g.hit).length;
-    lv.innerHTML=`<p class="note">Out of <b>${live.length}</b> edges graded so far, <b>${hits}</b> held and <b>${live.length-hits}</b> did not.</p>`
+    const md=live.filter(g=>g.model_hit!=null);
+    const mh=md.filter(g=>g.model_hit).length;
+    lv.innerHTML=`<p class="note">Out of <b>${live.length}</b> projection-gap edges graded so far, <b>${hits}</b> held and <b>${live.length-hits}</b> did not.`
+      +(md.length?` The board's own hit% side was gradable on <b>${md.length}</b> of them and went <b>${mh}-${md.length-mh}</b>.`:` The board's hit% side is not graded yet.`)+`</p>`
       +live.slice(0,60).map(g=>`<div class="rec"><span class="d">W${g.week}</span><span class="pk"><b>${esc(g.player)}</b> ${esc(g.stat)} · ${g.side} ${fmt(g.line)} <span style="color:var(--muted)">(${esc(g.proj_source)} ${fmt(g.proj_value)}, actual ${fmt(g.actual)})</span></span><span class="res ${g.hit?"hit":"miss"}">${g.hit?"HIT":"MISS"}</span></div>`).join("");
   }else{
     lv.innerHTML='<p class="sec-note">No graded weeks yet. The collector started Week 1, 2026 - the first scorecard posts after those games finish.</p>';
