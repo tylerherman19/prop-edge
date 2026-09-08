@@ -281,9 +281,12 @@ No exploitable vulnerability found. Details:
 - **RLS.** `schema.sql` enables RLS on all four tables with `select`-only
   policies for `anon`; no write policy exists, so the anon key is read-only
   and writes go through the service key, which bypasses RLS server-side.
-  `latest_board` is correctly `security_invoker = on`. **Verify once in the
-  dashboard that RLS is actually enabled on the live project** — this was not
-  tested against production, because testing it means attempting a write.
+  `latest_board` is correctly `security_invoker = on`. Confirmed applied on
+  the live project: re-running `schema.sql` there failed with
+  `policy "public read runs" for table "runs" already exists`, and the
+  `enable row level security` statements are in the same block, immediately
+  above it. Not probed with an actual write, which is the only way to test it
+  end to end.
 - **XSS.** `esc()` did not escape `'`, and the stat-filter `<option value>`
   interpolated a DB value unescaped. Not exploitable in practice (`stat` is
   always one of a fixed mapping's values, and writing to the DB needs the
