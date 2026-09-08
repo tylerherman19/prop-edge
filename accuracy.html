@@ -21,9 +21,9 @@
 <p class="lede">Two claims get tested here. One: which free projection model lands closer to what players actually do. Two: when a model disagrees with the market line, does the model side win. The first has a full 2025 season of evidence. The second started counting the week this site went live - the record below fills in as games finish.</p>
 
 <div class="strip-head"><h2>HEAD TO HEAD, 2025 SEASON</h2><span>PROJECTIONS VS ACTUALS</span></div>
-<p class="sec-note">Average miss per player per week, every 2025 regular-season week, players projected for a real role. Lower is better. Black is Sleeper, green is ESPN.</p>
-<div id="cmp"></div>
+<p class="sec-note">Every 2025 regular-season week, every player projected for a real role, each model's number checked against what the player actually did. In plain terms: out of all those checks, how close did the model usually land?</p>
 <div id="verdict" class="vs-grid"></div>
+<div id="cmp"></div>
 
 <div class="strip-head"><h2>WEEK BY WEEK, 2025</h2><span>RECEIVING YARDS, AVG MISS</span></div>
 <div id="weeks"></div>
@@ -51,22 +51,30 @@ async function load(){
     live=await fetch(`${SB_URL}/rest/v1/live_grades?select=*&order=week.desc&limit=200`,{headers:h}).then(r=>r.ok?r.json():[]);
   }catch(e){}
   if(!bt){document.getElementById("cmp").innerHTML='<p class="sec-note">Backtest file not published yet.</p>';return}
-  const s25=bt.seasons["2025_sleeper"]?.by_stat||{}, e25=bt.seasons["2025_espn"]?.by_stat||{};
-  const stats=ORDER.filter(s=>s25[s]&&e25[s]);
-  const maxMae=Math.max(...stats.map(s=>Math.max(s25[s].mae,e25[s].mae)));
-  let slWins=0, esWins=0;
-  document.getElementById("cmp").innerHTML='<div class="cmp head"><span>STAT</span><span>SLEEPER (black)</span><span>ESPN (green)</span><span style="text-align:right">CLOSER</span></div>'+stats.map(s=>{
-    const a=s25[s], b=e25[s], win=a.mae<=b.mae?"SLEEPER":"ESPN";
-    win==="SLEEPER"?slWins++:esWins++;
-    return `<div class="cmp"><span class="st">${esc(STAT_LABEL[s])}</span>
-      <span class="bars"><i class="a" style="width:${a.mae/maxMae*100}%"></i></span>
-      <span class="bars"><i class="b" style="width:${b.mae/maxMae*100}%"></i></span>
-      <span class="win">${win}</span></div>
-      <div class="cmp" style="padding-top:0;border-bottom:1px solid var(--faint)"><span></span><span style="font-size:11px;color:var(--muted)">misses by ${fmt(a.mae)} on ${fmt(a.n,0)} checks</span><span style="font-size:11px;color:var(--muted)">misses by ${fmt(b.mae)} on ${fmt(b.n,0)} checks</span><span></span></div>`;
+  const ERRS=bt.errors||{};
+  const UNIT={pass_yds:"yards",pass_tds:"touchdowns",pass_att:"attempts",pass_comp:"completions",pass_int:"interceptions",rush_yds:"yards",rush_tds:"touchdowns",rush_att:"carries",rec_yds:"yards",rec:"receptions",rec_tds:"touchdowns",rec_tgt:"targets",rush_rec_yds:"yards",pass_rush_yds:"yards",any_td:"touchdowns"};
+  const LABEL2=Object.assign({},STAT_LABEL,{rush_rec_yds:"Rush + receiving yards",pass_rush_yds:"Pass + rush yards",any_td:"Touchdowns scored"});
+  const stats=ORDER.concat(["rush_rec_yds","pass_rush_yds","any_td"]).filter(s=>(ERRS.sleeper||{})[s]&&(ERRS.espn||{})[s]);
+  const q=(a,p)=>a[Math.min(a.length-1,Math.round(p/100*(a.length-1)))];
+  const nice=(v,u)=>u==="yards"&&v>=19.5?Math.round(v):Math.round(v*10)/10;
+  const rowsFor=(key,name)=>stats.map(s=>({s,name,d:(ERRS[key]||{})[s]})).filter(x=>x.d);
+  const wins={Sleeper:0,ESPN:0,"Average":0};
+  const html=stats.map(s=>{
+    const cells=[["sleeper","SLEEPER"],["espn","ESPN"],["avg","THE AVERAGE"]].map(([k,nm])=>{
+      const d=(ERRS[k]||{})[s]; if(!d)return null;
+      return {nm, med:q(d.ae_q,50), p90:q(d.ae_q,90), n:d.n};
+    }).filter(Boolean);
+    const best=cells.reduce((a,b)=>a.med<=b.med?a:b);
+    wins[best.nm==="SLEEPER"?"Sleeper":best.nm==="ESPN"?"ESPN":"Average"]++;
+    return `<div class="accrow"><div class="st">${esc(LABEL2[s]||s)}</div>`+cells.map(c=>
+      `<div class="line"><span class="who">${c.nm}</span><span>out of <b>${c.n.toLocaleString("en-US")}</b> checks, landed within <b>${nice(c.med,UNIT[s])} ${UNIT[s]}</b> of the truth half the time, within <b>${nice(c.p90,UNIT[s])} ${UNIT[s]}</b> nine times out of ten</span>${c===best?'<span class="closer">CLOSEST</span>':''}</div>`
+    ).join("")+`</div>`;
   }).join("");
+  document.getElementById("cmp").innerHTML=html;
   document.getElementById("verdict").innerHTML=
-    `<div class="vs-cell"><span class="n">${slWins}</span><span class="l">stats where Sleeper lands closer</span></div>
-     <div class="vs-cell"><span class="n green">${esWins}</span><span class="l">stats where ESPN lands closer</span></div>`;
+    `<div class="vs-cell"><span class="n">${wins.Sleeper}</span><span class="l">stats where Sleeper lands closest</span></div>
+     <div class="vs-cell"><span class="n green">${wins.ESPN}</span><span class="l">stats where ESPN lands closest</span></div>`
+    +`<p class="sec-note">The average of the two models - what the board shows by default - is closest on ${wins.Average} of ${stats.length} stats.</p>`;
   const wkS=bt.seasons["2025_sleeper"]?.by_week_mae||{};
   const wkE=bt.seasons["2025_espn"]?.by_week_mae||{};
   const weeks=Object.keys(wkS).filter(w=>wkS[w].rec_yds&&wkE[w]?.rec_yds);
