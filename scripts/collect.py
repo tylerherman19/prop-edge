@@ -12,6 +12,7 @@ FANDUEL_AK = "FhMFpcPWXMeyZxOx"
 FD_LEAGUE = f"https://sbapi.md.sportsbook.fanduel.com/api/content-managed-page?page=CUSTOM&customPageId=nfl&_ak={FANDUEL_AK}"
 FD_EVENT  = f"https://sbapi.md.sportsbook.fanduel.com/api/event-page?_ak={FANDUEL_AK}&eventId={{eid}}&tab={{tab}}"
 PP_URL = "https://partner-api.prizepicks.com/projections?league_id=9&per_page=250&single_stat=true"
+PP_URL_CFB = "https://partner-api.prizepicks.com/projections?league_id=15&per_page=250&single_stat=true"  # college football
 SLEEPER_PROJ = "https://api.sleeper.app/v1/projections/nfl/regular/{season}/{week}?position={pos}"
 SLEEPER_PLAYERS = "https://api.sleeper.app/v1/players/nfl"
 ESPN_URL = "https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl/seasons/{season}/segments/0/leaguedefaults/1?view=kona_player_info"
@@ -113,7 +114,7 @@ def fanduel_collect(week, season, days_ahead=8):
                 def am(r):
                     return (((r.get("winRunnerOdds") or {}).get("americanDisplayOdds") or {}).get("americanOdds"))
                 out.append({
-                    "source": "fanduel", "game": g["name"], "kickoff": g["open"],
+                    "source": "fanduel", "league": "nfl", "game": g["name"], "kickoff": g["open"],
                     "player": player, "stat": stat, "line": line,
                     "over_odds": am(over), "under_odds": am(under),
                     "week": week, "season": season,
@@ -131,9 +132,9 @@ PP_STAT = {
     "Longest Reception": "long_rec", "Longest Rush": "long_rush", "Longest Completion": "long_comp",
     "Player Touchdowns": "any_td",
 }
-def prizepicks_collect(week, season):
+def prizepicks_collect(week, season, url=PP_URL, league="nfl"):
     out = []
-    data = get(PP_URL)
+    data = get(url)
     included = {}
     for inc in data.get("included") or []:
         included[(inc.get("type"), str(inc.get("id")))] = inc.get("attributes") or {}
@@ -156,11 +157,38 @@ def prizepicks_collect(week, season):
         grel = rel.get("game", {}).get("data") or {}
         game = included.get(("game", str(grel.get("id")))) or {}
         out.append({
-            "source": "prizepicks", "game": game.get("name") or "", "kickoff": a.get("start_time"),
+            "source": "prizepicks", "league": league, "game": game.get("name") or "",
+            "kickoff": a.get("start_time"),
             "player": name, "team": player.get("team"), "stat": stat, "line": a.get("line_score"),
             "over_odds": None, "under_odds": None, "week": week, "season": season,
         })
     return out
+
+NFL_TEAMS = {"ARI":"Arizona Cardinals","ATL":"Atlanta Falcons","BAL":"Baltimore Ravens",
+ "BUF":"Buffalo Bills","CAR":"Carolina Panthers","CHI":"Chicago Bears","CIN":"Cincinnati Bengals",
+ "CLE":"Cleveland Browns","DAL":"Dallas Cowboys","DEN":"Denver Broncos","DET":"Detroit Lions",
+ "GB":"Green Bay Packers","HOU":"Houston Texans","IND":"Indianapolis Colts","JAX":"Jacksonville Jaguars","JAC":"Jacksonville Jaguars",
+ "KC":"Kansas City Chiefs","LV":"Las Vegas Raiders","LAC":"Los Angeles Chargers","LAR":"Los Angeles Rams",
+ "MIA":"Miami Dolphins","MIN":"Minnesota Vikings","NE":"New England Patriots","NO":"New Orleans Saints",
+ "NYG":"New York Giants","NYJ":"New York Jets","PHI":"Philadelphia Eagles","PIT":"Pittsburgh Steelers",
+ "SF":"San Francisco 49ers","SEA":"Seattle Seahawks","TB":"Tampa Bay Buccaneers","TEN":"Tennessee Titans",
+ "WAS":"Washington Commanders"}
+
+def fill_pp_game_names(pp_lines, fd_games):
+    """PrizePicks rows often arrive with no game entity. Map the player's team
+    to the FanDuel game name ('Away @ Home') for that week."""
+    team2game = {}
+    for g in fd_games:
+        if " @ " not in g["name"]: continue
+        away, home = g["name"].split(" @ ", 1)
+        team2game[away] = g["name"]; team2game[home] = g["name"]
+    n = 0
+    for ln in pp_lines:
+        if ln.get("game"): continue
+        full = NFL_TEAMS.get((ln.get("team") or "").upper())
+        if full and full in team2game:
+            ln["game"] = team2game[full]; n += 1
+    return n
 
 # ---------- Sleeper ----------
 SL_STAT = {"pass_yd":"pass_yds","pass_td":"pass_tds","pass_att":"pass_att","pass_cmp":"pass_comp",
@@ -283,6 +311,8 @@ def main():
     except Exception as e:
         print(f"  espn failed: {e}", file=sys.stderr); es = []
     print(f"  espn: {len(es)} projections", file=sys.stderr)
+    named = fill_pp_game_names(pp_lines, games)
+    print(f"  prizepicks game names filled: {named}", file=sys.stderr)
     lines = fd_lines + pp_lines
     for p in sl + es:
         p["week"] = week
@@ -303,7 +333,27 @@ def main():
     with open("out/edges.json", "w") as f:
         json.dump(payload, f)
     print("wrote out/edges.json", file=sys.stderr)
-    supabase_publish(payload, projections)
+    supabase_publish(payload, projections, league="nfl")
+    # ---- college football: PrizePicks lines only (no free CFB projections,
+    # and FanDuel posts no CFB player props - verified Sep 2026). Honest
+    # lines-only board; week is the date bucket, not the official CFB week.
+    try:
+        cfb_lines = prizepicks_collect(week, season, url=PP_URL_CFB, league="cfb")
+    except Exception as e:
+        print(f"  prizepicks cfb failed: {e}", file=sys.stderr); cfb_lines = []
+    print(f"  prizepicks cfb: {len(cfb_lines)} lines", file=sys.stderr)
+    cfb_edges = build_edges(cfb_lines, [])
+    cfb_payload = {
+        "taken_at": datetime.now(timezone.utc).isoformat(),
+        "season": season, "week": week, "games": [],
+        "counts": {"lines": len(cfb_lines), "prizepicks": len(cfb_lines), "fanduel": 0,
+                   "sleeper_proj": 0, "espn_proj": 0, "edges": len(cfb_edges),
+                   "joined_sleeper": 0, "joined_espn": 0},
+        "edges": cfb_edges,
+    }
+    with open("out/edges_cfb.json", "w") as f:
+        json.dump(cfb_payload, f)
+    supabase_publish(cfb_payload, [], league="cfb")
 
 
 # ---------- Supabase write + grading (only when env keys are set) ----------
@@ -318,16 +368,16 @@ def sb(method, path, key, body=None, prefer=None):
         raw = r.read().decode()
         return json.loads(raw) if raw else None
 
-def supabase_publish(payload, projections):
+def supabase_publish(payload, projections, league="nfl"):
     key = os.environ.get("SUPABASE_SERVICE_KEY")
     if not os.environ.get("SUPABASE_URL") or not key:
         print("  supabase env not set; skipping publish", file=sys.stderr); return
-    run = sb("POST", "runs", key, {"season": payload["season"], "week": payload["week"],
+    run = sb("POST", "runs", key, {"season": payload["season"], "week": payload["week"], "league": league,
              "taken_at": payload["taken_at"], "counts": payload["counts"]}, prefer="return=representation")[0]
     rid = run["id"]
     rows = []
     for e in payload["edges"]:
-        rows.append({"run_id": rid, "source": e["source"], "game": e["game"], "kickoff": e["kickoff"],
+        rows.append({"run_id": rid, "league": e.get("league", league), "source": e["source"], "game": e["game"], "kickoff": e["kickoff"],
                      "player": e["player"], "team": e.get("team") or e.get("sleeper_team") or e.get("espn_team"),
                      "stat": e["stat"], "line": e["line"], "over_odds": e["over_odds"], "under_odds": e["under_odds"],
                      "sleeper_proj": e["sleeper_proj"], "espn_proj": e["espn_proj"],
@@ -336,6 +386,8 @@ def supabase_publish(payload, projections):
     for i in range(0, len(rows), 500):
         sb("POST", "edges", key, rows[i:i+500])
     print(f"  supabase: run {rid}, {len(rows)} edges", file=sys.stderr)
+    if league != "nfl":
+        return
     # backtest payload if present
     try:
         bt = json.load(open("out/backtest.json"))
