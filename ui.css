@@ -45,7 +45,7 @@ body{background:var(--paper);color:var(--ink);font-family:"Archivo",sans-serif;f
 .pmid .cell small{display:block;font-size:10px;font-weight:700;letter-spacing:.1em;color:var(--muted)}
 .pmid .cell b{font-size:15px}
 .pmid .cell.green b{color:var(--green)}
-.edgebar{position:relative;height:22px;margin-top:8px;background:var(--faint)}
+.edgebar{display:block;position:relative;height:22px;margin-top:8px;background:var(--faint)}
 .edgebar .ln{position:absolute;top:0;bottom:0;left:50%;width:2px;background:var(--ink)}
 .edgebar .fill{position:absolute;top:4px;bottom:4px}
 .edgebar .fill.over{background:var(--green)}
