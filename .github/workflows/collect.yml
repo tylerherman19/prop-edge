@@ -1,0 +1,22 @@
+name: collect
+on:
+  workflow_dispatch:
+  # cron schedule is added when the pipeline goes live (needs SUPABASE_URL +
+  # SUPABASE_SERVICE_KEY repo secrets):
+  # schedule:
+  #   - cron: "*/30 * * * *"
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: collect and publish
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: |
+          python scripts/backtest.py
+          python scripts/collect.py
