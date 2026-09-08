@@ -4,7 +4,8 @@ create table if not exists runs (
   taken_at timestamptz not null default now(),
   season int not null,
   week int not null,
-  counts jsonb
+  counts jsonb,
+  league text not null default 'nfl'   -- nfl | cfb
 );
 create table if not exists edges (
   id bigint generated always as identity primary key,
@@ -17,17 +18,19 @@ create table if not exists edges (
   over_odds int, under_odds int,
   sleeper_proj numeric, espn_proj numeric,
   sleeper_edge numeric, espn_edge numeric,
-  week int not null, season int not null
+  week int not null, season int not null,
+  league text not null default 'nfl'   -- nfl | cfb
 );
 create index if not exists edges_run on edges(run_id);
 create index if not exists edges_week on edges(season, week);
+-- latest run per league (NFL and CFB publish independently)
 create or replace view latest_board
 with (security_invoker = on) as
-  select e.source, e.game, e.kickoff, e.player, e.team, e.stat, e.line,
+  select e.league, e.source, e.game, e.kickoff, e.player, e.team, e.stat, e.line,
          e.over_odds, e.under_odds, e.sleeper_proj, e.espn_proj,
          e.sleeper_edge, e.espn_edge, e.week, e.season
   from edges e
-  join (select max(id) as id from runs) r on e.run_id = r.id;
+  join (select league, max(id) as id from runs group by league) r on e.run_id = r.id;
 create table if not exists backtest (
   id text primary key,
   payload jsonb not null,
