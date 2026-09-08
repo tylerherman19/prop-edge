@@ -22,7 +22,7 @@
 
 <div class="strip-head"><h2>HEAD TO HEAD, 2025 SEASON</h2><span>PROJECTIONS VS ACTUALS</span></div>
 <p class="sec-note">Every 2025 regular-season week, every player projected for a real role, each model's number checked against what the player actually did. In plain terms: out of all those checks, how close did the model usually land?</p>
-<div id="verdict" class="vs-grid"></div>
+<p class="note" id="verdict"></p>
 <div id="cmp"></div>
 
 <div class="strip-head"><h2>WEEK BY WEEK, 2025</h2><span>RECEIVING YARDS, AVG MISS</span></div>
@@ -72,9 +72,7 @@ async function load(){
   }).join("");
   document.getElementById("cmp").innerHTML=html;
   document.getElementById("verdict").innerHTML=
-    `<div class="vs-cell"><span class="n">${wins.Sleeper}</span><span class="l">stats where Sleeper lands closest</span></div>
-     <div class="vs-cell"><span class="n green">${wins.ESPN}</span><span class="l">stats where ESPN lands closest</span></div>`
-    +`<p class="sec-note">The average of the two models - what the board shows by default - is closest on ${wins.Average} of ${stats.length} stats.</p>`;
+    `We tracked <b>${stats.length} stats</b> across the full 2025 season. Sleeper was the more accurate model on <b>${wins.Sleeper}</b> of them, ESPN on <b>${wins.ESPN}</b>, and the average of the two - what the board shows by default - on <b>${wins.Average}</b>. Stat by stat:`;
   const wkS=bt.seasons["2025_sleeper"]?.by_week_mae||{};
   const wkE=bt.seasons["2025_espn"]?.by_week_mae||{};
   const weeks=Object.keys(wkS).filter(w=>wkS[w].rec_yds&&wkE[w]?.rec_yds);
@@ -85,7 +83,7 @@ async function load(){
   const lv=document.getElementById("live");
   if(live&&live.length){
     const hits=live.filter(g=>g.hit).length;
-    lv.innerHTML=`<div class="vs-grid"><div class="vs-cell"><span class="n green">${hits}</span><span class="l">edges that hit</span></div><div class="vs-cell"><span class="n">${live.length-hits}</span><span class="l">edges that missed</span></div></div>`
+    lv.innerHTML=`<p class="note">Out of <b>${live.length}</b> edges graded so far, <b>${hits}</b> held and <b>${live.length-hits}</b> did not.</p>`
       +live.slice(0,60).map(g=>`<div class="rec"><span class="d">W${g.week}</span><span class="pk"><b>${esc(g.player)}</b> ${esc(g.stat)} · ${g.side} ${fmt(g.line)} <span style="color:var(--muted)">(${esc(g.proj_source)} ${fmt(g.proj_value)}, actual ${fmt(g.actual)})</span></span><span class="res ${g.hit?"hit":"miss"}">${g.hit?"HIT":"MISS"}</span></div>`).join("");
   }else{
     lv.innerHTML='<p class="sec-note">No graded weeks yet. The collector started Week 1, 2026 - the first scorecard posts after those games finish.</p>';
