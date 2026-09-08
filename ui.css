@@ -53,7 +53,8 @@ body{background:var(--paper);color:var(--ink);font-family:"Archivo",sans-serif;f
 .edgebar .pin{position:absolute;top:2px;bottom:2px;width:2px}
 .edgebar .pin.sl{background:var(--ink)}
 .edgebar .pin.es{background:#fff;box-shadow:0 0 0 1px var(--ink)}
-.edgenum{position:absolute;top:2px;font-size:11px;font-weight:800;letter-spacing:.04em}
+.edgenum{position:absolute;top:2px;font-size:11px;font-weight:800;letter-spacing:.04em;z-index:3;background:var(--paper);padding:0 2px}
+.edgenum.in{background:transparent;padding:0}
 .pdet{display:none;padding:0 12px 12px;font-size:13px;line-height:20px}
 .prop.open .pdet{display:block}
 .pdet p{padding:6px 0;border-top:1px solid var(--faint)}
