@@ -38,7 +38,7 @@
 <div id="board"></div>
 <p class="note" id="datanote"></p>
 <section class="colophon">
-<p>Your advantage means the model's number sits above the market's line - room the market is not pricing. Vegas advantage means the model sits under the line - the book's number looks safe. The hit chance is how often a gap that size actually held across the whole 2025 season.</p>
+<p>Your advantage means the player's own game log clears the market's line more often than not. Vegas advantage means his log stays under it. The hit chance is graded on his own tracked games - recency-weighted, shrunk toward his position's league average when he's played few, then calibrated on 2025 results.</p>
 <p>A big gap is a disagreement, not a guarantee. Nothing here is betting advice - it is arithmetic on free public data.</p>
 </section>
 </main>
@@ -50,29 +50,35 @@ const STAT_LABEL = {pass_yds:"Passing yards",pass_tds:"Passing TDs",pass_att:"Pa
 const UNIT = {pass_yds:"yards",pass_tds:"touchdowns",pass_att:"attempts",pass_comp:"completions",pass_int:"interceptions",rush_yds:"yards",rush_tds:"touchdowns",rush_att:"carries",rec_yds:"yards",rec:"receptions",rec_tds:"touchdowns",rec_tgt:"targets",rush_rec_yds:"yards",pass_rush_yds:"yards",long_rec:"yards",long_rush:"yards",long_comp:"yards",any_td:"touchdowns"};
 const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const fmt=(n,d=1)=>n==null?"—":Number(n).toLocaleString("en-US",{maximumFractionDigits:d});
-let ROWS=[], META={}, SIDE="all", MODEL="avg", ERR=null, SORT="hit", SDIR=-1;
+let ROWS=[], META={}, SIDE="all", MODEL="avg", PC=null, PG=null, SORT="hit", SDIR=-1;
 
-function modelKey(r){
-  if(MODEL==="sleeper")return "sleeper";
-  if(MODEL==="espn")return "espn";
-  if(r.sleeper_proj!=null&&r.espn_proj!=null)return "avg";
-  return r.sleeper_proj!=null?"sleeper":"espn";
+function normName(s){
+  return String(s||"").normalize("NFKD").replace(/[\u0300-\u036f]/g,"")
+    .toLowerCase().replace(/\./g,"").replace(/'/g,"").replace(/-/g," ")
+    .replace(/\b(jr|sr|ii|iii|iv|v)\b\.?/g,"").replace(/\s+/g," ").trim();
 }
-function cdfAt(q,x){
-  if(x<=q[0])return 0.005;
-  if(x>=q[q.length-1])return 0.995;
-  let lo=0,hi=q.length-1;
-  while(hi-lo>1){const m=(lo+hi)>>1; if(q[m]<=x)lo=m; else hi=m;}
-  const frac=(x-q[lo])/((q[hi]-q[lo])||1e-9);
-  return (lo+frac)/(q.length-1);
+function erf(x){
+  const s=x<0?-1:1, ax=Math.abs(x), t=1/(1+0.3275911*ax);
+  const y=1-((((((1.061405429*t-1.453152027)*t)+1.421413741)*t-0.284496736)*t+0.254829592)*t)*Math.exp(-ax*ax);
+  return s*y;
 }
-function hitProb(r){
-  const p=projOf(r); if(p==null||!ERR)return null;
-  const d=(ERR[modelKey(r)]||{})[r.stat];
-  if(!d||!d.q||!d.q.length||(d.n||0)<150)return null;
-  const gap=p-r.line, F=cdfAt(d.q,gap);
-  const h=gap>0?F:1-F;
-  return Math.max(.01,Math.min(.99,h));
+function interpCalib(xs,ys,p){
+  if(p<=xs[0])return ys[0];
+  if(p>=xs[xs.length-1])return ys[ys.length-1];
+  let lo=0,hi=xs.length-1;
+  while(hi-lo>1){const m=(lo+hi)>>1; if(xs[m]<=p)lo=m; else hi=m;}
+  const span=(xs[hi]-xs[lo])||1;
+  return ys[lo]+(p-xs[lo])/span*(ys[hi]-ys[lo]);
+}
+function playerHit(r){
+  if(!PC)return null;
+  const st=PC[r.stat]; if(!st)return null;
+  const c=st[normName(r.player)]; if(!c)return null;
+  let p=0.5*(1+erf((c[1]-r.line)/(c[2]*Math.SQRT2)));
+  p=Math.max(0.02,Math.min(0.98,p));
+  const g=PG&&PG[r.stat];
+  if(g&&g.calib_x&&g.calib_y&&g.calib_x.length)p=interpCalib(g.calib_x,g.calib_y,p);
+  return {p:p,n:c[0],m:c[1],s:c[2]};
 }
 
 function projOf(r){
@@ -84,10 +90,7 @@ function projOf(r){
 }
 function edgeOf(r){const p=projOf(r);return p==null?null:p-r.line;}
 function passes(r){
-  const e=edgeOf(r);
-  if(e==null)return false;
-  if(SIDE==="over"&&e<=0)return false;
-  if(SIDE==="under"&&e>=0)return false;
+  if(edgeOf(r)==null)return false;
   const st=document.getElementById("sel-stat").value; if(st&&r.stat!==st)return false;
   const tm=document.getElementById("sel-team").value; if(tm&&r.team!==tm)return false;
   const sc=document.getElementById("sel-src").value; if(sc&&r.source!==sc)return false;
@@ -95,13 +98,14 @@ function passes(r){
 }
 function barScale(rows){let m=10;for(const r of rows){const a=Math.abs(edgeOf(r)||0);if(a>m)m=a}return m;}
 function render(){
-  const rows=ROWS.filter(passes).map(r=>({r,h:hitProb(r)}))
+  const rows=ROWS.filter(passes).map(r=>({r,h:playerHit(r)}))
+    .filter(({h})=>SIDE==="all"||(h&&(SIDE==="over"?h.p>=0.5:h.p<0.5)))
     .sort((a,b)=>{
       if(SORT==="gap"){
         const ga=Math.abs(edgeOf(a.r)||0), gb=Math.abs(edgeOf(b.r)||0);
         return SDIR*(ga-gb);
       }
-      const ka=a.h==null?-1:Math.abs(a.h-.5), kb=b.h==null?-1:Math.abs(b.h-.5);
+      const ka=a.h==null?-1:Math.abs(a.h.p-.5), kb=b.h==null?-1:Math.abs(b.h.p-.5);
       return SDIR>0?ka-kb:kb-ka;
     });
   document.getElementById("count").textContent=rows.length+" PROPS";
@@ -109,21 +113,19 @@ function render(){
   if(!rows.length){wrap.innerHTML='<p class="sec-note">Nothing on the board with these filters. Loosen one.</p>';return}
   const scale=barScale(rows.map(x=>x.r));
   for(const {r,h} of rows.slice(0,400)){
-    const p=projOf(r), gap=p-r.line, you=gap>0;
-    const half=Math.min(50,Math.abs(gap)/scale*50);
+    const p=projOf(r), gap=p==null?null:p-r.line, you=h?h.p>=0.5:(gap!=null&&gap>0);
+    const half=gap==null?0:Math.min(50,Math.abs(gap)/scale*50);
     const unit=UNIT[r.stat]||"";
     const statL=STAT_LABEL[r.stat]||r.stat;
     const k=r.kickoff?new Date(r.kickoff).toLocaleString("en-US",{timeZone:TZ,weekday:"short",hour:"numeric",minute:"2-digit"}):"";
-    const hp=h==null?null:Math.round(h*100);
-    const d0=(ERR&&(ERR[modelKey(r)]||{})[r.stat]);
-    const curveOK=!!(d0&&(d0.n||0)>=150);
-    const basis=curveOK?(d0.n>=10000?(Math.round(d0.n/100)/10)+"K":d0.n.toLocaleString("en-US")):"";
-    const say = you
-      ? `${esc(r.player)}: the model says <b>${fmt(p)}</b>, the line is <b>${fmt(r.line)}</b> - that is <b>${fmt(Math.abs(gap))} ${unit}</b> of room above the number.${hp==null?"":` Gaps this size held <b>${hp}%</b> of the time in 2025.`} Your advantage.`
-      : `${esc(r.player)}: the model says <b>${fmt(p)}</b> - <b>${fmt(Math.abs(gap))} ${unit}</b> under the <b>${fmt(r.line)}</b> line.${hp==null?"":` Numbers this far apart held for Vegas <b>${hp}%</b> of the time in 2025.`}`;
+    const hp=h==null?null:Math.round(Math.max(h.p,1-h.p)*100);
+    const say = h==null
+      ? `${esc(r.player)}: the model says <b>${fmt(p)}</b>, the line is <b>${fmt(r.line)}</b>${gap==null?"":` - that is <b>${fmt(Math.abs(gap))} ${unit}</b> ${gap>0?"above":"under"} the number`}. No player curve yet, so no honest hit chance.`
+      : you
+      ? `${esc(r.player)}: across <b>${h.n}</b> of his own tracked games he averages <b>${fmt(h.m)}</b> ${unit} - that clears the <b>${fmt(r.line)}</b> line <b>${hp}%</b> of the time. Your advantage.`
+      : `${esc(r.player)}: across <b>${h.n}</b> of his own tracked games he averages <b>${fmt(h.m)}</b> ${unit} - that stays under the <b>${fmt(r.line)}</b> line <b>${hp}%</b> of the time. Vegas advantage.`;
     const slT=r.sleeper_proj!=null?`Sleeper says <b>${fmt(r.sleeper_proj)}</b>`:"No Sleeper number";
     const esT=r.espn_proj!=null?`ESPN says <b>${fmt(r.espn_proj)}</b>`:"no ESPN number";
-    const d=d0;
     const box=document.createElement("div");box.className="prop";
     box.innerHTML=`
       <button class="prow" type="button" aria-expanded="false">
@@ -132,8 +134,8 @@ function render(){
         <span class="pgrid">
           <span><small>LINE</small><b>${fmt(r.line)}</b></span>
           <span><small>ESTIMATE</small><b>${fmt(p)}</b></span>
-          <span class="${you?"g-you":"g-vegas"}"><small>GAP</small><b>${Math.abs(gap)<0.05?"0":(you?"+":"−")+fmt(Math.abs(gap))}</b></span>
-          <span class="${you?"g-you":"g-vegas"}"><small>HIT%</small><b>${hp==null?"—":hp+"%"}</b><i>${curveOK?basis+" 2025 CHECKS":"NO 2025 CURVE"}</i></span>
+          <span class="${you?"g-you":"g-vegas"}"><small>GAP</small><b>${gap==null||Math.abs(gap)<0.05?"0":(gap>0?"+":"−")+fmt(Math.abs(gap))}</b></span>
+          <span class="${you?"g-you":"g-vegas"}"><small>HIT%</small><b>${hp==null?"—":hp+"%"}</b><i>${h?h.n+" GAMES":"NO PLAYER CURVE"}</i></span>
         </span>
         <span class="edgebar" aria-hidden="true">
           <span class="ln"></span>
@@ -143,7 +145,7 @@ function render(){
       </button>
       <div class="pdet">
         <p>${slT} · ${esT}. Showing the ${MODEL==="avg"?"average of the two":MODEL} estimate.</p>
-        ${curveOK?`<p>Hit chance basis: <b>${d.n.toLocaleString("en-US")}</b> graded 2025 projections of ${esc(statL.toLowerCase())}. The Method page explains the math.</p>`:`<p>No 2025 curve deep enough for this stat, so no honest hit chance - the gap is still real arithmetic.</p>`}
+        ${h?`<p>Hit chance basis: <b>${h.n}</b> of his tracked ${esc(statL.toLowerCase())} games (avg ${fmt(h.m)}, spread ${fmt(h.s)}), recency-weighted and shrunk toward his position's league average, then calibrated on 2025 results. The Method page explains the math.</p>`:`<p>No player curve for ${esc(r.player)} on this stat yet (under 3 tracked games), so no honest hit chance - the gap is still real arithmetic.</p>`}
         ${r.game?`<p><b>${esc(r.game)}</b>${k?" · "+esc(k):""}${r.over_odds?` · ${r.over_odds>0?"+":""}${r.over_odds}/${r.under_odds>0?"+":""}${r.under_odds}`:""}</p>`:(k?`<p><b>${esc(k)}</b>${r.over_odds?` · ${r.over_odds>0?"+":""}${r.over_odds}/${r.under_odds>0?"+":""}${r.under_odds}`:""}</p>`:"")}
       </div>`;
     box.querySelector(".prow").addEventListener("click",()=>{const o=box.classList.toggle("open");box.querySelector(".prow").setAttribute("aria-expanded",String(o))});
@@ -160,7 +162,8 @@ async function load(){
     const m=await fetch(`${SB_URL}/rest/v1/runs?select=*&order=id.desc&limit=1`,{headers:{apikey:SB_KEY,Authorization:"Bearer "+SB_KEY}}).then(x=>x.json());
     META=(m&&m[0])||{};
     const bt=await fetch(`${SB_URL}/rest/v1/backtest?select=payload&id=eq.latest`,{headers:{apikey:SB_KEY,Authorization:"Bearer "+SB_KEY}}).then(x=>x.json());
-    ERR=(bt&&bt[0]&&bt[0].payload&&bt[0].payload.errors)||null;
+    const pl=(bt&&bt[0]&&bt[0].payload)||{};
+    PC=pl.player_curves||null; PG=pl.player_model_grade||null;
   }catch(err){
     document.getElementById("lede").textContent="The data robot has not published yet. Check back in a few minutes.";
     return;
