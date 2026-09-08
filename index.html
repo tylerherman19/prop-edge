@@ -23,6 +23,8 @@
   <button class="fbtn on" data-side="all">ALL</button>
   <button class="fbtn over" data-side="over">YOUR ADVANTAGE</button>
   <button class="fbtn under" data-side="under">VEGAS ADVANTAGE</button>
+  <button class="fbtn srt on" data-sort="hit">SORT: HIT%</button>
+  <button class="fbtn srt" data-sort="gap">SORT: GAP</button>
   <select id="sel-stat" aria-label="Stat filter"><option value="">ALL STATS</option></select>
   <select id="sel-team" aria-label="Team filter"><option value="">ALL TEAMS</option></select>
   <select id="sel-src" aria-label="Market source">
@@ -48,7 +50,7 @@ const STAT_LABEL = {pass_yds:"Passing yards",pass_tds:"Passing TDs",pass_att:"Pa
 const UNIT = {pass_yds:"yards",pass_tds:"touchdowns",pass_att:"attempts",pass_comp:"completions",pass_int:"interceptions",rush_yds:"yards",rush_tds:"touchdowns",rush_att:"carries",rec_yds:"yards",rec:"receptions",rec_tds:"touchdowns",rec_tgt:"targets",rush_rec_yds:"yards",pass_rush_yds:"yards",long_rec:"yards",long_rush:"yards",long_comp:"yards",any_td:"touchdowns"};
 const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const fmt=(n,d=1)=>n==null?"—":Number(n).toLocaleString("en-US",{maximumFractionDigits:d});
-let ROWS=[], META={}, SIDE="all", MODEL="avg", ERR=null;
+let ROWS=[], META={}, SIDE="all", MODEL="avg", ERR=null, SORT="hit", SDIR=-1;
 
 function modelKey(r){
   if(MODEL==="sleeper")return "sleeper";
@@ -94,7 +96,14 @@ function passes(r){
 function barScale(rows){let m=10;for(const r of rows){const a=Math.abs(edgeOf(r)||0);if(a>m)m=a}return m;}
 function render(){
   const rows=ROWS.filter(passes).map(r=>({r,h:hitProb(r)}))
-    .sort((a,b)=>(b.h==null?-1:Math.abs(b.h-.5))-(a.h==null?-1:Math.abs(a.h-.5)));
+    .sort((a,b)=>{
+      if(SORT==="gap"){
+        const ga=Math.abs(edgeOf(a.r)||0), gb=Math.abs(edgeOf(b.r)||0);
+        return SDIR*(ga-gb);
+      }
+      const ka=a.h==null?-1:Math.abs(a.h-.5), kb=b.h==null?-1:Math.abs(b.h-.5);
+      return SDIR>0?ka-kb:kb-ka;
+    });
   document.getElementById("count").textContent=rows.length+" PROPS";
   const wrap=document.getElementById("board");wrap.innerHTML="";
   if(!rows.length){wrap.innerHTML='<p class="sec-note">Nothing on the board with these filters. Loosen one.</p>';return}
@@ -106,13 +115,15 @@ function render(){
     const statL=STAT_LABEL[r.stat]||r.stat;
     const k=r.kickoff?new Date(r.kickoff).toLocaleString("en-US",{timeZone:TZ,weekday:"short",hour:"numeric",minute:"2-digit"}):"";
     const hp=h==null?null:Math.round(h*100);
+    const d0=(ERR&&(ERR[modelKey(r)]||{})[r.stat]);
+    const curveOK=!!(d0&&(d0.n||0)>=150);
+    const basis=curveOK?(d0.n>=10000?(Math.round(d0.n/100)/10)+"K":d0.n.toLocaleString("en-US")):"";
     const say = you
       ? `${esc(r.player)}: the model says <b>${fmt(p)}</b>, the line is <b>${fmt(r.line)}</b> - that is <b>${fmt(Math.abs(gap))} ${unit}</b> of room above the number.${hp==null?"":` Gaps this size held <b>${hp}%</b> of the time in 2025.`} Your advantage.`
       : `${esc(r.player)}: the model says <b>${fmt(p)}</b> - <b>${fmt(Math.abs(gap))} ${unit}</b> under the <b>${fmt(r.line)}</b> line.${hp==null?"":` Numbers this far apart held for Vegas <b>${hp}%</b> of the time in 2025.`}`;
     const slT=r.sleeper_proj!=null?`Sleeper says <b>${fmt(r.sleeper_proj)}</b>`:"No Sleeper number";
     const esT=r.espn_proj!=null?`ESPN says <b>${fmt(r.espn_proj)}</b>`:"no ESPN number";
-    const d=(ERR&&(ERR[modelKey(r)]||{})[r.stat]);
-    const curveOK=d&&(d.n||0)>=150;
+    const d=d0;
     const box=document.createElement("div");box.className="prop";
     box.innerHTML=`
       <button class="prow" type="button" aria-expanded="false">
@@ -122,7 +133,7 @@ function render(){
           <span><small>LINE</small><b>${fmt(r.line)}</b></span>
           <span><small>ESTIMATE</small><b>${fmt(p)}</b></span>
           <span class="${you?"g-you":"g-vegas"}"><small>GAP</small><b>${Math.abs(gap)<0.05?"0":(you?"+":"−")+fmt(Math.abs(gap))}</b></span>
-          <span class="${you?"g-you":"g-vegas"}"><small>HIT%</small><b>${hp==null?"—":hp+"%"}</b></span>
+          <span class="${you?"g-you":"g-vegas"}"><small>HIT%</small><b>${hp==null?"—":hp+"%"}</b><i>${curveOK?basis+" 2025 CHECKS":"NO 2025 CURVE"}</i></span>
         </span>
         <span class="edgebar" aria-hidden="true">
           <span class="ln"></span>
@@ -132,8 +143,8 @@ function render(){
       </button>
       <div class="pdet">
         <p>${slT} · ${esT}. Showing the ${MODEL==="avg"?"average of the two":MODEL} estimate.</p>
-        ${curveOK?`<p>The hit chance comes from ${d.n.toLocaleString("en-US")} graded 2025 projections of ${esc(statL.toLowerCase())}: how often the model missed by less than this gap.</p>`:`<p>No 2025 curve deep enough for this stat, so no honest hit chance - the gap is still real arithmetic.</p>`}
-        <p><b>${esc(r.game||"Game TBD")}</b>${k?" · "+esc(k):""}${r.over_odds?` · ${r.over_odds>0?"+":""}${r.over_odds}/${r.under_odds>0?"+":""}${r.under_odds}`:""}</p>
+        ${curveOK?`<p>Hit chance basis: <b>${d.n.toLocaleString("en-US")}</b> graded 2025 projections of ${esc(statL.toLowerCase())}. The Method page explains the math.</p>`:`<p>No 2025 curve deep enough for this stat, so no honest hit chance - the gap is still real arithmetic.</p>`}
+        ${r.game?`<p><b>${esc(r.game)}</b>${k?" · "+esc(k):""}${r.over_odds?` · ${r.over_odds>0?"+":""}${r.over_odds}/${r.under_odds>0?"+":""}${r.under_odds}`:""}</p>`:(k?`<p><b>${esc(k)}</b>${r.over_odds?` · ${r.over_odds>0?"+":""}${r.over_odds}/${r.under_odds>0?"+":""}${r.under_odds}`:""}</p>`:"")}
       </div>`;
     box.querySelector(".prow").addEventListener("click",()=>{const o=box.classList.toggle("open");box.querySelector(".prow").setAttribute("aria-expanded",String(o))});
     wrap.appendChild(box);
@@ -169,6 +180,11 @@ async function load(){
   render();
 }
 document.querySelectorAll(".fbtn").forEach(b=>b.addEventListener("click",()=>{SIDE=b.dataset.side;document.querySelectorAll(".fbtn").forEach(x=>x.classList.toggle("on",x===b));render()}));
+document.querySelectorAll(".fbtn.srt").forEach(b=>b.addEventListener("click",()=>{
+  if(b.classList.contains("on")){SDIR=-SDIR}
+  else{SORT=b.dataset.sort;SDIR=-1;document.querySelectorAll(".fbtn.srt").forEach(x=>x.classList.toggle("on",x===b))}
+  render();
+}));
 ["sel-stat","sel-team","sel-src"].forEach(id=>document.getElementById(id).addEventListener("change",render));
 document.getElementById("sel-model").addEventListener("change",e=>{MODEL=e.target.value;render()});
 load();
