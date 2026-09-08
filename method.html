@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Prop Edge - Method</title>
+<meta name="description" content="Where the numbers come from and exactly what the edge number means." />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Archivo:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="ui.css" />
+</head>
+<body>
+<div class="bug"><span class="b1"><a href="index.html">PROP EDGE</a></span><span class="b2">METHOD</span><span class="b3"></span></div>
+<nav class="pagenav">
+<a href="index.html">THE BOARD</a>
+<a href="accuracy.html">ACCURACY</a>
+<a href="method.html" class="on">METHOD</a>
+</nav>
+<main>
+<p class="lede">The whole machine in one paragraph: a collector wakes up on a schedule, pulls this week's player-prop lines from two free market feeds and this week's player projections from two free model feeds, matches them player by player and stat by stat, subtracts, and ranks the board by the size of the disagreement. No paid data, no logins, no scraped logins - every feed is an open door the publisher's own app walks through.</p>
+
+<div class="strip-head"><h2>THE LINES</h2><span>WHAT THE MARKET EXPECTS</span></div>
+<p class="note"><b>FanDuel.</b> The sportsbook's own web client reads anonymous JSON for every game: passing, rushing and receiving props with the real line and both prices (the -114/-114 style numbers). When the board shows FanDuel, you are looking at an actual posted number with juice attached.</p>
+<p class="note"><b>PrizePicks.</b> The pick'em app's public board: one flat line per player and stat, no odds. Useful as a second opinion on where the market sits, and it covers far more players than the sportsbook page does.</p>
+
+<div class="strip-head"><h2>THE MODELS</h2><span>WHAT THE PROJECTIONS EXPECT</span></div>
+<p class="note"><b>Sleeper.</b> The fantasy app's open API serves weekly stat-level projections - yards, catches, touchdowns, attempts - for every rostered player. Refreshed through the week.</p>
+<p class="note"><b>ESPN.</b> ESPN's fantasy API is anonymously readable and carries per-week projections in the same shape. The two models disagree with each other plenty; the Accuracy page tracks which one lands closer.</p>
+
+<div class="strip-head"><h2>THE EDGE NUMBER</h2><span>WHAT IT MEANS AND WHAT IT DOESN'T</span></div>
+<p class="note">Edge = model projection minus market line, in the stat's own units. "Maye +12.5 passing yards" means the model average sits 12.5 yards over the posted number. Green means the models lean over, red means under. It is a measurement of disagreement, not a prediction of the future and not betting advice. Models are wrong constantly - the Accuracy page shows exactly how wrong, in plain numbers.</p>
+<p class="note">Props that join cleanly to at least one model make the board. Props that don't - defenses, kickers, some deep backups - are counted in the data note and left out rather than guessed at.</p>
+
+<div class="strip-head"><h2>THE PLUMBING</h2><span>WHERE IT LIVES</span></div>
+<p class="note">A scheduled job on GitHub pulls the feeds, computes the board, and writes it into a Supabase database. This site reads the latest snapshot straight from the database when you open it. Lines move during the week; the snapshot time is in the black bar up top, and every snapshot is kept so edges can be graded after the games.</p>
+<section class="colophon"><p>Built on free public endpoints. Like every open gate, any of these feeds can close or change shape without notice - if a feed dies, the data note on the board will say which one.</p></section>
+</main>
+</body>
+</html>
