@@ -116,23 +116,8 @@ def main():
     g2, wk2 = grade(ep, ea)
     result["seasons"]["2025_espn"] = {"by_stat": g2, "by_week_mae": wk2,
         "note": "ESPN weekly projections vs ESPN actuals, 2025 regular season, players projected for a real role."}
-    print("== 2026 finished weeks ==", file=sys.stderr)
-    ep26, ea26 = espn_season(2026)
-    # ESPN ships placeholder zero "actuals" for unplayed weeks; only weeks fully
-    # before the current NFL week count. Weeks run Tue-Mon; W1 opened Sep 1 2026.
-    from datetime import datetime, timezone
-    anchor = datetime(2026, 9, 1, tzinfo=timezone.utc)
-    cur = min(18, ((datetime.now(timezone.utc) - anchor).days // 7) + 1)
-    done_weeks = [w for w in range(1, cur)]
-    if done_weeks:
-        g3, wk3 = grade([p for p in ep26 if p["week"] in done_weeks], ea26)
-        result["seasons"]["2026_espn"] = {"by_stat": g3, "by_week_mae": wk3, "weeks": done_weeks,
-            "note": "ESPN projections vs actuals, 2026 weeks " + ",".join(map(str, done_weeks)) + "."}
-        sp26, _ = sleeper_season(2026, done_weeks)
-        # grade sleeper 2026 against ESPN actuals by name+week
-        g4, wk4 = grade(sp26, ea26)
-        result["seasons"]["2026_sleeper"] = {"by_stat": g4, "by_week_mae": wk4, "weeks": done_weeks,
-            "note": "Sleeper projections vs actuals (actuals via ESPN), 2026 weeks " + ",".join(map(str, done_weeks)) + "."}
+    result["note_2026"] = ("The 2026 season opens Sep 9, so no 2026 weeks are graded here. "
+        "This season's record builds week by week in the live-grades table as games finish.")
     with open("out/backtest.json", "w") as f:
         json.dump(result, f)
     print("wrote out/backtest.json", file=sys.stderr)
