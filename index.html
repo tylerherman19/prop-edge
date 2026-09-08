@@ -95,7 +95,7 @@ function render(){
           <span class="fill ${over?"over":"under"}" style="${over?`left:50%;width:${half}%`:`right:50%;width:${half}%`}"></span>
           ${slP!=null?`<span class="pin sl" style="left:${clamp(slP)}%"></span>`:""}
           ${esP!=null?`<span class="pin es" style="left:${clamp(esP)}%"></span>`:""}
-          <span class="edgenum" style="${numStyle}">${over?"+":"−"}${fmt(Math.abs(e))}</span>
+          <span class="edgenum${room?"":" in"}" style="${numStyle}">${over?"+":"−"}${fmt(Math.abs(e))}</span>
         </span>
       </button>
       <div class="pdet">
