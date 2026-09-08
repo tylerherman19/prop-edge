@@ -89,9 +89,22 @@ function poisOver(mean,line){
   for(let i=0;i<=k;i++){if(i)term*=lam/i;cdf+=term;}
   return Math.max(0.02,Math.min(0.98,1-cdf));
 }
-// A stat missing from player_curves was not published: its 2025 walk-forward
-// sample was too small to fit and test a curve, so there is no honest number.
-function statPublished(stat){return !!(PC&&PC[stat]);}
+// Whether this stat earned a displayed probability. The backend already omits
+// unpublished curves, but the board must not depend on that alone: a stale or
+// partially written payload would otherwise resurrect the stats the 2025
+// holdout says are coin flips, and those are exactly the ones that produced
+// 90-98% "locks". So re-apply the gate here from whatever the payload carries,
+// most authoritative first, and fail closed.
+function statPublished(stat){
+  if(!(PC&&PC[stat]))return false;                    // no curve shipped at all
+  const g=(PG&&PG[stat])||null;
+  if(g&&typeof g.published==="boolean")return g.published;
+  if(PM&&Array.isArray(PM.published_stats))return PM.published_stats.indexOf(stat)>=0;
+  // Older payload with no gate recorded: derive it from the graded sample the
+  // payload does carry. Same threshold the backend uses (MIN_PAIRS).
+  const minN=(PM&&PM.min_pairs)||1000;
+  return !!(g&&typeof g.n==="number"&&g.n>=minN);
+}
 function playerHit(r){
   if(!statPublished(r.stat))return null;
   const c=PC[r.stat][normName(r.player)]; if(!c)return null;

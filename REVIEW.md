@@ -308,9 +308,14 @@ No exploitable vulnerability found. Details:
 
 **Done on this branch** (each verified, numbers re-measured):
 
-1. **Publish gate: `MIN_PAIRS = 1000`.** Only the six stats with enough
-   walk-forward sample ship a curve; the other eight ship none and the board
-   shows "—" with the reason. Kills every fake lock in C2.
+1. **Publish gate: `MIN_PAIRS = 1000`,** enforced on both sides. The backend
+   ships a curve only for the six stats with enough walk-forward sample; the
+   frontend re-applies the gate from whatever the payload carries
+   (`published` flag, else `published_stats`, else the graded `n` per stat)
+   and fails closed. Trusting the backend's omission alone would have left the
+   live board printing 90–98% locks for as long as a stale payload sat in
+   Supabase, which is exactly what happened between the merge and the first
+   backtest run. Kills every fake lock in C2.
 2. **Poisson for count stats** (`pass_tds`, `pass_int`, `rush_tds`,
    `rec_tds`, `any_td`), mirrored exactly in JS. Fixes M3.
 3. **Calibration knot support.** A knot's swing is scaled by the training
