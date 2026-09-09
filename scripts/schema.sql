@@ -5,7 +5,8 @@ create table if not exists runs (
   season int not null,
   week int not null,
   counts jsonb,
-  league text not null default 'nfl'   -- nfl | cfb
+  league text not null default 'nfl',   -- nfl | cfb
+  context jsonb                        -- StatTree consensus line + matchup context (NFL player props only)
 );
 create table if not exists edges (
   id bigint generated always as identity primary key,
@@ -36,6 +37,11 @@ create table if not exists backtest (
   payload jsonb not null,
   updated timestamptz not null default now()
 );
+create table if not exists stattree (
+  id text primary key,                 -- 'latest'
+  payload jsonb not null,              -- meta + nfl_games + cfb_games
+  updated timestamptz not null default now()
+);
 create table if not exists live_grades (
   id bigint generated always as identity primary key,
   week int not null, season int not null,
@@ -46,32 +52,14 @@ create table if not exists live_grades (
   graded_at timestamptz not null default now(),
   unique (week, season, source, player, stat, proj_source)
 );
--- public read-only; writes happen with the service key from the collector.
--- The whole file is meant to be re-runnable: everything above uses
--- "if not exists" or "create or replace", but CREATE POLICY has no such form
--- in Postgres, so drop first. Without this a re-run aborts on the first policy
--- and, because the SQL editor runs the script in one transaction, nothing
--- after it applies either - including the migration at the bottom.
+-- public read-only; writes happen with the service key from the collector
 alter table runs enable row level security;
 alter table edges enable row level security;
 alter table backtest enable row level security;
 alter table live_grades enable row level security;
-drop policy if exists "public read runs" on runs;
+alter table stattree enable row level security;
 create policy "public read runs" on runs for select to anon using (true);
-drop policy if exists "public read edges" on edges;
 create policy "public read edges" on edges for select to anon using (true);
-drop policy if exists "public read backtest" on backtest;
 create policy "public read backtest" on backtest for select to anon using (true);
-drop policy if exists "public read grades" on live_grades;
 create policy "public read grades" on live_grades for select to anon using (true);
-
--- ---------------------------------------------------------------------------
--- Migration (safe to re-run on its own, and safe to run these three lines
--- alone if the rest of the file is already applied): the live record grades
--- the player-model side too,
--- so the Accuracy page can validate the number the board actually prints and
--- not only the projection-gap side. collect.py falls back to inserting without
--- these columns until this block has been run.
-alter table live_grades add column if not exists model_p numeric;
-alter table live_grades add column if not exists model_side text;
-alter table live_grades add column if not exists model_hit boolean;
+create policy "public read stattree" on stattree for select to anon using (true);
