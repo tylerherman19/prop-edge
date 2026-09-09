@@ -17,6 +17,7 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: |
+          python scripts/sumersports.py
           python scripts/backtest.py
           python - <<'PY'
           import json, os, sys
@@ -24,13 +25,6 @@ jobs:
           from collect import sb
           key = os.environ["SUPABASE_SERVICE_KEY"]
           bt = json.load(open("out/backtest.json"))
-          # `updated` must be sent explicitly: this is an upsert, and on conflict
-          # PostgREST only writes the columns present in the body, so the column's
-          # `default now()` never fires on an update and the row keeps whatever
-          # timestamp the last collect.py publish left. Without this the column
-          # reports a time hours older than the payload it describes.
-          sb("POST", "backtest", key,
-             {"id": "latest", "payload": bt, "updated": bt["generated"]},
-             prefer="resolution=merge-duplicates")
-          print("backtest published", bt["generated"])
+          sb("POST", "backtest", key, {"id": "latest", "payload": bt}, prefer="resolution=merge-duplicates")
+          print("backtest published")
           PY
