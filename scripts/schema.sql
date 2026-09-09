@@ -42,6 +42,16 @@ create table if not exists stattree (
   payload jsonb not null,              -- meta + nfl_games + cfb_games
   updated timestamptz not null default now()
 );
+create table if not exists sumersports (
+  id text primary key,                 -- team_off | team_def | form_off | form_def | pers_off | pers_def
+  payload jsonb not null,              -- {generated, headers, seasons: {2025: [...], 2024: [...]}}
+  updated timestamptz not null default now()
+);
+create table if not exists snapshots (
+  id text primary key,                 -- week1_am | week1_final | week1_scout | week1_eval
+  payload jsonb not null,
+  updated timestamptz not null default now()
+);
 create table if not exists live_grades (
   id bigint generated always as identity primary key,
   week int not null, season int not null,
@@ -63,3 +73,7 @@ create policy "public read edges" on edges for select to anon using (true);
 create policy "public read backtest" on backtest for select to anon using (true);
 create policy "public read grades" on live_grades for select to anon using (true);
 create policy "public read stattree" on stattree for select to anon using (true);
+alter table sumersports enable row level security;
+alter table snapshots enable row level security;
+create policy "public read sumersports" on sumersports for select to anon using (true);
+create policy "public read snapshots" on snapshots for select to anon using (true);
