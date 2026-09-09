@@ -13,6 +13,9 @@ disagreement. Static site + scheduled collector + Supabase.
 - `scripts/backtest.py` - grades Sleeper and ESPN projections vs actuals and
   fits the player-level model (2025 full season + finished 2026 weeks),
   writes out/backtest.json
+- `scripts/sumersports.py` - weekly pull of SumerSports public team tables
+  (offense/defense EPA + success, formation and personnel tendencies; 2024 +
+  2025), publishes to the `sumersports` table
 - `scripts/schema.sql` - one-time database setup
 
 Data sources are anonymous public endpoints; no keys needed for reads.
@@ -92,6 +95,16 @@ The `stattree` table row id=`latest` holds: `meta` (per-sheet generated_at +
 row counts), `nfl_games` (per game: spread, total, weather, venue), and
 `cfb_games` (same for college). Sheets refresh once daily (~10 AM ET); our
 collector just re-reads them.
+
+### `sumersports` table (weekly, written by sumersports.py)
+
+Rows: team_off, team_def (32 teams: EPA/play, success %, EPA/pass, EPA/rush,
+ADoT, scramble %, INT %, man/power run %, 3/4-man rush %), form_off, form_def
+(EPA + usage by formation, man/zone % on defense), pers_off, pers_def (by
+personnel grouping). Each payload: {generated, headers, seasons: {"2025":
+[...], "2024": [...]}}; rows carry rank + team abbr. Raw league context: used
+for matchup reads and fantasy scheme context, and a candidate model input -
+any model use requires a holdout win first.
 
 ### `live_grades` (written by collect.py as weeks finish)
 
