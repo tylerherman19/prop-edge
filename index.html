@@ -209,16 +209,28 @@ function render(){
   }
   if(rows.length>400){const p=document.createElement("p");p.className="sec-note";p.textContent=`Showing the 400 strongest of ${rows.length}. Filter down for the rest.`;wrap.appendChild(p)}
 }
+// latest_board holds the newest run PER LEAGUE, so the read has to filter to
+// nfl or the CFB rows come with it. And PostgREST enforces its own max-rows
+// (1000 here) server-side: a bigger `limit` does NOT raise it, it is silently
+// capped, which was dropping ~350 of the 1351 NFL props and skewing the counts
+// in the lede. Page through with offset instead, under a total ordering so a
+// row cannot be duplicated or skipped across a page boundary.
+const BOARD_ORDER="order=player.asc,stat.asc,line.asc,source.asc,kickoff.asc";
+async function fetchBoard(pageSize=1000,maxPages=12){
+  const h={apikey:SB_KEY,Authorization:"Bearer "+SB_KEY};
+  const out=[];
+  for(let p=0;p<maxPages;p++){
+    const r=await fetch(`${SB_URL}/rest/v1/latest_board?select=*&league=eq.nfl&${BOARD_ORDER}&offset=${p*pageSize}&limit=${pageSize}`,{headers:h});
+    if(!r.ok)throw new Error("board "+r.status);
+    const d=await r.json();
+    out.push(...d);
+    if(d.length<pageSize)break;   // short page = last page
+  }
+  return out;
+}
 async function load(){
   try{
-    // league=eq.nfl: latest_board carries the newest run PER LEAGUE, so an
-    // unfiltered read also pulls the CFB rows. limit: PostgREST caps a request
-    // at 1000 rows by default, which was silently dropping ~40% of the board
-    // (1672 rows in the view, 1000 returned) and skewing the counts below.
-    const r=await fetch(`${SB_URL}/rest/v1/latest_board?select=*&league=eq.nfl&limit=5000`,{headers:{apikey:SB_KEY,Authorization:"Bearer "+SB_KEY}});
-    if(!r.ok)throw new Error("board "+r.status);
-    const data=await r.json();
-    ROWS=data;
+    ROWS=await fetchBoard();
     const m=await fetch(`${SB_URL}/rest/v1/runs?select=*&order=id.desc&limit=1`,{headers:{apikey:SB_KEY,Authorization:"Bearer "+SB_KEY}}).then(x=>x.json());
     META=(m&&m[0])||{};
     const bt=await fetch(`${SB_URL}/rest/v1/backtest?select=payload&id=eq.latest`,{headers:{apikey:SB_KEY,Authorization:"Bearer "+SB_KEY}}).then(x=>x.json());
