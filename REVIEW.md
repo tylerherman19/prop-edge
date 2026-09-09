@@ -197,8 +197,9 @@ the more accurate model on N stats." The payload already contains
 not use it.
 
 **M5. The board fetched at most 1000 of 1672 rows, and pulled college
-football onto an NFL page.** `latest_board?select=*` has no `league` filter
-and no `limit`; the view returns the newest run *per league*. Live counts at
+football onto an NFL page.** `latest_board?select=*` has no `league` filter,
+and the row cap is not something a client `limit` can lift — PostgREST
+enforces `max-rows` server-side. The view returns the newest run *per league*. Live counts at
 review time: 1,352 NFL + 320 CFB = 1,672 rows, of which PostgREST returned
 1,000. ~35% of the NFL board never reached the page, the CFB rows competed
 for the cap with no ordering guarantee, and the "N PROPS" count and the lede
@@ -329,7 +330,10 @@ No exploitable vulnerability found. Details:
    board: what the calibration is actually calibrated to, why the board tilts
    under, and that it is a property of the proxy.
 7. **`normName` parity** (C4), **sort/side listener split** (C5),
-   **`league=eq.nfl&limit=5000`** (M5), **under-side copy** (M6),
+   **`league=eq.nfl` plus offset pagination** (M5 — PostgREST enforces
+   `max-rows` server-side, so a larger `limit` is silently capped and does not
+   fix the truncation; the board now pages under a total ordering, verified at
+   1000 + 351 = 1351 rows with zero duplicate keys), **under-side copy** (M6),
    **matched-sample head-to-head** (M4), **zero handling in live grading**
    (M7), season filter and escaping fixes (N7, XSS).
 8. **`model_p` / `model_side` / `model_hit` in `live_grades`** so the live
