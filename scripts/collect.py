@@ -122,6 +122,83 @@ def fanduel_collect(week, season, days_ahead=8):
         time.sleep(0.3)
     return out, games
 
+# ---------- StatTree (thestattree.com free static sheets, daily ~10AM ET) ----------
+ST_BASE = "https://www.thestattree.com/data/{}.json"
+ST_SHEETS = {"pass_yds":"nfl_pass_yds","pass_tds":"nfl_pass_tds","rush_yds":"nfl_rush_yds",
+             "rec_yds":"nfl_rec_yds","rec":"nfl_receptions","any_td":"nfl_atd"}
+# scalar row fields worth carrying onto an edge (present ones only, lowercased)
+ST_SCALAR = ["Line","Odds","HitRate","HitRateN","HitL5","HitL5N","PerG","Spread","GameTotal",
+             "ImpliedTotal","PROE","PROERank","Depth","IsHome","OpponentAbbr",
+             "InjBadge","InjStatus","InjDetail","InjOff","InjDef","OppPassDefRank","OppYpaAllowed",
+             "OppManRate","OppRushDefRank","OppYpcAllowed","Req","TargetShare","TargetsPerG",
+             "ADOT","YPT","YPR","CatchRate","Thin","Sidelined","RosterStatus","Pos","KickTs"]
+
+def _st_curate(row):
+    m = row.get("modal") or {}
+    out = {}
+    for k in ST_SCALAR:
+        v = row.get(k)
+        if v is not None: out[k.lower()] = v
+    rates = m.get("rates")
+    if rates: out["hit_rates"] = rates
+    ctx = m.get("context") or {}
+    for k in ("stadium","roof","rest"):
+        if ctx.get(k) is not None: out[k] = ctx[k]
+    return out
+
+def stattree_collect():
+    """Fetch the free sheets. Returns (index, payload) where index maps
+    (norm_name, team) and norm_name -> curated row per stat."""
+    index = {}
+    meta = {}
+    players_out = {}
+    for stat, sheet in ST_SHEETS.items():
+        try:
+            d = get(ST_BASE.format(sheet))
+        except Exception as e:
+            print(f"  stattree {sheet} failed: {e}", file=sys.stderr); continue
+        meta[stat] = {"sheet": sheet, "generated_at": (d.get("meta") or {}).get("generated_at"),
+                      "rows": (d.get("meta") or {}).get("rows")}
+        per_player = {}
+        for row in d.get("rows") or []:
+            name = row.get("Player")
+            if not name: continue
+            cur = _st_curate(row)
+            per_player.setdefault(norm_name(name), []).append((row.get("TeamAbbr"), cur))
+        players_out[stat] = per_player
+        index[stat] = per_player
+    # game-level sheets, merged per game
+    def merge_games(names, id_keys):
+        games = {}
+        for nm in names:
+            try:
+                d = get(ST_BASE.format(nm))
+            except Exception as e:
+                print(f"  stattree {nm} failed: {e}", file=sys.stderr); continue
+            for row in d.get("rows") or []:
+                gid = None
+                for k in id_keys:
+                    if row.get(k) is not None: gid = row[k]; break
+                if gid is None: continue
+                g = games.setdefault(str(gid), {})
+                for k, v in row.items():
+                    if v is not None and k not in ("modal",): g[k.lower()] = v
+        return list(games.values())
+    nfl_games = merge_games(["nfl_spread","nfl_totals","nfl_weather"], ("GameId","game_id"))
+    cfb_games = merge_games(["cfb_spread","cfb_totals","cfb_weather"], ("Game_ID","game_id"))
+    payload = {"meta": meta, "nfl_games": nfl_games, "cfb_games": cfb_games}
+    return index, payload
+
+def stattree_lookup(index, stat, player, team):
+    per = (index.get(stat) or {}).get(norm_name(player))
+    if not per: return None
+    if team:
+        t = team.upper()
+        for abbr, cur in per:
+            if (abbr or "").upper() == t: return cur
+    if len(per) == 1: return per[0][1]
+    return None
+
 # ---------- PrizePicks ----------
 PP_STAT = {
     "Pass Yards": "pass_yds", "Pass TDs": "pass_tds", "Pass Attempts": "pass_att",
@@ -248,6 +325,7 @@ def espn_collect(week, season, limit=2000):
         for sid, canon in ESPN_STAT.items():
             v = smap.get(sid)
             if v is not None: vals[canon] = v
+        if "rush_yd" if False else False: pass
         for canon, v in vals.items():
             out.append({"source":"espn","player":name,"team":team,"pos":pos,
                         "stat":canon,"value":round(v,2),"week":week,"season":season})
@@ -310,6 +388,8 @@ def main():
     except Exception as e:
         print(f"  espn failed: {e}", file=sys.stderr); es = []
     print(f"  espn: {len(es)} projections", file=sys.stderr)
+    st_index, st_payload = stattree_collect()
+    print(f"  stattree sheets: {len(st_index)} stats, nfl games {len(st_payload['nfl_games'])}, cfb games {len(st_payload['cfb_games'])}", file=sys.stderr)
     named = fill_pp_game_names(pp_lines, games)
     print(f"  prizepicks game names filled: {named}", file=sys.stderr)
     lines = fd_lines + pp_lines
@@ -317,6 +397,13 @@ def main():
         p["week"] = week
     projections = sl + es
     edges = build_edges(lines, projections)
+    st_hits = 0
+    for e in edges:
+        team = e.get("team") or e.get("sleeper_team") or e.get("espn_team")
+        cur = stattree_lookup(st_index, e["stat"], e["player"], team)
+        if cur:
+            e["stattree"] = cur; st_hits += 1
+    print(f"  stattree context attached to {st_hits}/{len(edges)} edges", file=sys.stderr)
     joined_sl = sum(1 for e in edges if e["sleeper_proj"] is not None)
     joined_es = sum(1 for e in edges if e["espn_proj"] is not None)
     print(f"  edges: {len(edges)} rows; sleeper joined {joined_sl}, espn joined {joined_es}", file=sys.stderr)
@@ -326,7 +413,7 @@ def main():
         "counts": {"lines": len(lines), "fanduel": len(fd_lines), "prizepicks": len(pp_lines),
                    "sleeper_proj": len(sl), "espn_proj": len(es),
                    "edges": len(edges), "joined_sleeper": joined_sl, "joined_espn": joined_es},
-        "edges": edges,
+        "edges": edges, "stattree_payload": st_payload,
     }
     os.makedirs("out", exist_ok=True)
     with open("out/edges.json", "w") as f:
@@ -381,12 +468,18 @@ def supabase_publish(payload, projections, league="nfl"):
                      "stat": e["stat"], "line": e["line"], "over_odds": e["over_odds"], "under_odds": e["under_odds"],
                      "sleeper_proj": e["sleeper_proj"], "espn_proj": e["espn_proj"],
                      "sleeper_edge": e["sleeper_edge"], "espn_edge": e["espn_edge"],
-                     "week": e["week"], "season": e["season"]})
+                     "week": e["week"], "season": e["season"], "context": e.get("stattree")})
     for i in range(0, len(rows), 500):
         sb("POST", "edges", key, rows[i:i+500])
     print(f"  supabase: run {rid}, {len(rows)} edges", file=sys.stderr)
     if league != "nfl":
         return
+    # stattree payload if collected this run
+    stp = payload.get("stattree_payload")
+    if stp:
+        sb("POST", "stattree", key, {"id": "latest", "payload": stp, "updated": payload["taken_at"]},
+           prefer="resolution=merge-duplicates")
+        print("  supabase: stattree published", file=sys.stderr)
     # backtest payload if present
     try:
         bt = json.load(open("out/backtest.json"))
@@ -397,69 +490,13 @@ def supabase_publish(payload, projections, league="nfl"):
         pass
     grade_finished_weeks(key, payload["season"], payload["week"])
 
-def load_player_model():
-    """The published player curves, so the live record can grade what the board
-    actually shows (its hit% side) and not just the projection gap. Missing file
-    or unpublished stat -> no model side for that prop, which is the honest
-    answer rather than a fabricated one."""
-    try:
-        bt = json.load(open("out/backtest.json"))
-    except Exception:
-        return None, None, None
-    return bt.get("player_curves") or {}, bt.get("player_model_grade") or {}, bt.get("player_model") or {}
-
-def _interp(x, y, p):
-    if p <= x[0]: return y[0]
-    if p >= x[-1]: return y[-1]
-    lo, hi = 0, len(x) - 1
-    while hi - lo > 1:
-        mid = (lo + hi) // 2
-        if x[mid] <= p: lo = mid
-        else: hi = mid
-    span = (x[hi] - x[lo]) or 1
-    return y[lo] + (p - x[lo]) / span * (y[hi] - y[lo])
-
-def model_p_over(curves, grades, dist, player, stat, line):
-    """Mirror of p_hit + calibration in backtest.py / index.html."""
-    cs = (curves or {}).get(stat)
-    if not cs: return None
-    c = cs.get(norm_name(player))
-    if not c: return None
-    n, m, sd = c
-    if (dist or {}).get(stat) == "poisson":
-        lam = max(m, 1e-6)
-        k = math.ceil(line) - 1 if line != int(line) else int(line)
-        if k < 0: p = 0.98
-        else:
-            cdf, term = 0.0, math.exp(-lam)
-            for i in range(k + 1):
-                if i: term *= lam / i
-                cdf += term
-            p = 1.0 - cdf
-    elif sd > 0:
-        p = 0.5 * (1 + math.erf((m - line) / (sd * math.sqrt(2))))
-    else:
-        p = 1.0 if m > line else 0.0
-    p = max(0.02, min(0.98, p))
-    g = (grades or {}).get(stat) or {}
-    if g.get("calib_x") and g.get("calib_y"):
-        p = _interp(g["calib_x"], g["calib_y"], p)
-    return p
-
 def grade_finished_weeks(key, season, cur_week):
     """Grade stored edges for finished site weeks against ESPN actuals
-    (ESPN's scoring period for a site week is site week + FEED_OFFSET).
-
-    Grades two things per prop: the projection-gap side (what the models
-    disagreed about) and, when the stat is published, the player-model side --
-    the one the board actually prints. Grading only the first left the live
-    record validating a signal the board no longer leads with."""
-    curves, grades, pmeta = load_player_model()
-    dist = (pmeta or {}).get("dist") or {}
+    (ESPN's scoring period for a site week is site week + FEED_OFFSET)."""
     for w in range(1, cur_week):
         done = sb("GET", f"live_grades?select=id&week=eq.{w}&season=eq.{season}&limit=1", key)
         if done: continue
-        edges = sb("GET", f"edges?select=*&week=eq.{w}&season=eq.{season}&league=eq.nfl&order=run_id.desc&limit=3000", key) or []
+        edges = sb("GET", f"edges?select=*&week=eq.{w}&season=eq.{season}&order=run_id.desc&limit=3000", key) or []
         if not edges: continue
         # keep only the latest run's rows
         latest = edges[0]["run_id"]; edges = [e for e in edges if e["run_id"] == latest]
@@ -471,16 +508,9 @@ def grade_finished_weeks(key, season, cur_week):
         out = []
         for e in edges:
             a = aidx.get(norm_name(e["player"]))
-            if not a: continue           # no actuals row: bye, inactive, postponed - not graded
-            if not a.get("_played"): continue
-            # A played week with the key missing is a real zero, not a missing
-            # observation. Skipping those dropped every under that won on a
-            # goose egg, which biased the live record.
+            if not a: continue
             av = a.get(e["stat"])
-            if av is None:
-                if e["stat"] not in ESPN_STAT.values(): continue
-                av = 0.0
-            mp = model_p_over(curves, grades, dist, e["player"], e["stat"], float(e["line"]))
+            if av is None: continue
             for src in ("sleeper", "espn"):
                 pv = e.get(f"{src}_proj")
                 if pv is None: continue
@@ -488,26 +518,12 @@ def grade_finished_weeks(key, season, cur_week):
                 if abs(edge) < 1.0: continue  # only grade real disagreements
                 side = "over" if edge > 0 else "under"
                 hit = (av > e["line"]) if side == "over" else (av < e["line"])
-                row = {"week": w, "season": season, "source": e["source"], "player": e["player"],
-                       "stat": e["stat"], "line": e["line"], "proj_source": src, "proj_value": pv,
-                       "actual": av, "side": side, "hit": hit}
-                if mp is not None:
-                    row["model_p"] = round(mp, 4)
-                    row["model_side"] = "over" if mp >= 0.5 else "under"
-                    row["model_hit"] = (av > e["line"]) if mp >= 0.5 else (av < e["line"])
-                out.append(row)
+                out.append({"week": w, "season": season, "source": e["source"], "player": e["player"],
+                            "stat": e["stat"], "line": e["line"], "proj_source": src, "proj_value": pv,
+                            "actual": av, "side": side, "hit": hit})
         if out:
-            try:
-                sb("POST", "live_grades", key, out, prefer="resolution=merge-duplicates")
-            except Exception as ex:
-                # model_p/model_side/model_hit need the migration at the bottom of
-                # scripts/schema.sql. Until it is run, still record the projection grades.
-                print(f"  grade w{w}: full insert failed ({ex}); retrying without model columns "
-                      f"- run the ALTER TABLE block in scripts/schema.sql", file=sys.stderr)
-                bare = [{k: v for k, v in r.items() if not k.startswith("model_")} for r in out]
-                sb("POST", "live_grades", key, bare, prefer="resolution=merge-duplicates")
-        graded_model = sum(1 for r in out if "model_p" in r)
-        print(f"  grade w{w}: {len(out)} edges graded ({graded_model} with a model side)", file=sys.stderr)
+            sb("POST", "live_grades", key, out, prefer="resolution=merge-duplicates")
+        print(f"  grade w{w}: {len(out)} edges graded", file=sys.stderr)
 
 def espn_actuals_only(season, week):
     filt = json.dumps({"players":{"limit":2500,"sortPercOwned":{"sortPriority":1,"sortAsc":False}}})
@@ -525,8 +541,6 @@ def espn_actuals_only(season, week):
         for sid, canon in ESPN_STAT.items():
             v = smap.get(sid)
             if v is not None: r[canon] = v
-        # a row with no offensive stat at all is a placeholder, not a 0-for-the-day
-        r["_played"] = any(k in r for k in ESPN_STAT.values())
         act.append(r)
     return None, act
 
